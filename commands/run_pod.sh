@@ -1,34 +1,41 @@
 #!/bin/bash
 
-# run_pod.sh -o owner -k public_key yaml_file
+# run_pod.sh -o owner -k public_key -p storage_path yaml_file
+# E.g. run_pod.sh -o fror@dtu.dk -p testdir ubuntu_sciencedata.yaml
 
 EXTERNAL_IP=130.226.137.130
 SCIENCEDATA_WS_IP=10.0.0.13
-SSH_SERVICE_YAML_FILE="/root/sciencedata_kubernetes/ssh_service.yaml"
-NFS_DEPLOYMENT_YAML_FILE="/root/sciencedata_kubernetes/nfs_deployment.yaml"
-NFS_CLASS_YAML_FILE="/root/sciencedata_kubernetes/nfs_class.yaml"
-NFS_CLAIM_YAML_FILE="/root/sciencedata_kubernetes/nfs_claim.yaml"
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+SSH_SERVICE_YAML_FILE="$DIR/../commands/ssh_service.yaml"
+NFS_DEPLOYMENT_YAML_FILE="$DIR/../commands/nfs_deployment.yaml"
+NFS_CLASS_YAML_FILE="$DIR/../commands/nfs_class.yaml"
+NFS_CLAIM_YAML_FILE="$DIR/../commands/nfs_claim.yaml"
 
 yaml_file=""
 owner=""
 ssh_public_key=""
-# Path on home server to be claimed, relative to /tank/storage/owner/
-# Notice that the mountpoint is specified in the pod yaml
 storage_path=""
 dryrun=
 
 while getopts "o:k:p:d" flag; do
 	case "$flag" in
 		o)
+			# ScienceData userid who will own the pod
 			owner=$OPTARG
 			;;
 		k)
+			# Public key to be inserted into /root/.ssh/authorized_keys
 			ssh_public_key=$OPTARG
 			;;
 		p)
+			# Path on home server to be claimed, relative to /tank/storage/owner/
+			# Notice that the mountpoint is specified in the pod yaml
 			storage_path=$OPTARG
 			;;
 		d)
+			# If set, no actions are performed, only reported
 			dryrun="yes"
 			;;
 		\?)
