@@ -8,6 +8,9 @@ spec:
   containers:
   - name: ubuntu-focal
     image: sciencedata/ubuntu_focal_sciencedata
+    volumeMounts:
+      - name: sciencedata
+        mountPath: "/mnt"
     ports:
     - containerPort: 80
       protocol: TCP
@@ -15,5 +18,5 @@ spec:
       protocol: TCP
     env:
     - name: SSH_PUBLIC_KEY
-      value: 
+      value: ""
   restartPolicy: Never

@@ -4,7 +4,7 @@ metadata:
   name: ubuntu-focal-ssh
 spec:
   externalIPs:
-    - 130.226.137.130
+    - kube.sciencedata.dk
   type: NodePort
   ports:
   - port: 22

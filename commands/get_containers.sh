@@ -7,16 +7,18 @@ echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age(s)|status"
 echo "###"
 kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
 	podJson="`kubectl get pod "$pod" -o json`"
-	hostip=`echo "$podJson" | jq -r '.status.hostIP'`
-	podip=`echo "$podJson" | jq -r '.status.podIP'`
+	hostip=`echo "$podJson" | jq -r '.status.hostIP' | sed 's|null||'`
+	podip=`echo "$podJson" | jq -r '.status.podIP' | sed 's|null||'`
 	#owner=`echo "$podJson" | jq -r '.metadata.labels | .user+"@"+.domain'`
 	username=`echo "$podJson" | jq -r '.metadata.labels | .user'`
 	domain=`echo "$podJson" | jq -r '.metadata.labels | .domain'`
 	status=`echo "$podJson" | jq -r '.status.phase'`
-	startTime=`echo "$podJson" | jq -r '.status.startTime'`
-	startSeconds=`date -d "$startTime" +"%s"`
-	nowSeconds=`date  +"%s"`
-	diffSeconds=$((nowSeconds-startSeconds))
+	if [ "$status" == "Running" ]; then
+		startTime=`echo "$podJson" | jq -r '.status.startTime'`
+		startSeconds=`date -d "$startTime" +"%s"`
+		nowSeconds=`date  +"%s"`
+		diffSeconds=$((nowSeconds-startSeconds))
+	fi
 	if [ -n "$domain" ]; then
 		owner="$username@$domain"
 	else
@@ -25,9 +27,12 @@ kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
 	if [ -n "$user" -a "$user" != "$owner" ]; then
 		continue
 	fi
+	
+	nodePort=`kubectl get service "${pod}-ssh" -o json 2>/dev/null | jq .spec.ports[].nodePort`
+	
 	kubectl get pod "$pod" -o json | jq -r --arg POD "$pod" --arg HOSTIP "$hostip" --arg PODIP "$podip" \
-	--arg OWNER "$owner" --arg AGE "$diffSeconds" --arg STATUS "$status" \
-	'.spec.containers[] | $POD+"|"+.name+"|"+.image+"|"+$PODIP+"|"+$HOSTIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS'
+	--arg OWNER "$owner" --arg AGE "$diffSeconds" --arg STATUS "$status" --arg NODEPORT "$nodePort" \
+	'.spec.containers[] | $POD+"|"+.name+"|"+.image+"|"+$PODIP+"|"+$HOSTIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS+"|"+$NODEPORT'
 done | sed 's|@$||'
 
 #kubectl label pod twocontainers domain=
