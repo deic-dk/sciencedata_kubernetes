@@ -2,14 +2,10 @@ kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
   name: NFS_CLAIM_NAME # will be configured by run_pod.sh
-  annotations:
-    volume.beta.kubernetes.io/storage-class: "NFS_STORAGE_CLASS_NAME" # "managed-nfs-storage"
-    nfs.io/storage-path: "STORAGE_PATH" # not required, depending on whether this annotation was shown in the storage class description
-    # will be configured by run_pod.sh as user_id, e.g. testuser@dtu.dk/mydir, causing /tank/storage/testuser@dtu.dk/mydir to be served.
 spec:
-  storageClassName: NFS_STORAGE_CLASS_NAME # managed-nfs-storage
+  storageClassName: nfs
   accessModes:
     - ReadWriteMany
   resources:
     requests:
-      storage: 1Mi # this is not used, see https://stackoverflow.com/questions/48218938/how-to-enable-storage-size-parameter-in-persistent-volume-claim
+      storage: 10Gi # ignored

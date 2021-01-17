@@ -27,11 +27,11 @@ done
 pod_name=${@:$OPTIND:1}
 ssh_service_name="$pod_name-ssh"
 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+DIR="$(dirname "$(readlink -f "$0")")"
 
 # If user is given, check that user owns pod
 if [ -n "$user" ]; then
-	owner=`$DIR/get_containers.sh | grep "^$pod_name|" | awk -F'|' '{print $6}'`
+	owner=`$DIR/get_containers | grep "^$pod_name|" | awk -F'|' '{print $6}'`
 	if [ "$owner" != "" && "$owner" != "$user" ]; then
 		echo "ERROR: pod $pod_name owned by $owner, NOT $user" >&2
 		exit 1
@@ -40,7 +40,7 @@ fi
 
 
 # First find the IP of the pod
-ip=`$DIR/get_containers.sh | grep "^$pod_name|" | awk -F'|' '{print $4}'`
+ip=`$DIR/get_containers | grep "^$pod_name|" | awk -F'|' '{print $4}' | tr -d '\n'`
 # Kill reverse proxy
 if [ -n "$ip" ]; then
 	pid=`ps auxw | grep -v grep | grep -E "caddy reverse-proxy --from https://kube.sciencedata.dk:[0-9]+ --to $ip:80" | awk '{print $2}'`

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: NFS_VOLUME_NAME # will be configured by run_pod.sh
+spec:
+  capacity:
+    storage: 10Gi # ignored
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+  nfs:
+    path: /tank/storage/test2/STORAGE_PATH # will be configured by run_pod.sh
+    server: SERVER_IP # will be configured by run_pod.sh

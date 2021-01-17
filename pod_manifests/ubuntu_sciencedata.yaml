@@ -4,13 +4,14 @@ metadata:
   name: ubuntu-focal
   labels:
     app: ubuntu
+    reverseProxyPort: 443
 spec:
   containers:
   - name: ubuntu-focal
     image: sciencedata/ubuntu_focal_sciencedata
     volumeMounts:
       - name: sciencedata
-        mountPath: "/mnt"
+        mountPath: "/root/www"
     ports:
     - containerPort: 80
       protocol: TCP
