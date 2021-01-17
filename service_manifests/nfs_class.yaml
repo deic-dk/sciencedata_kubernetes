@@ -1,9 +1,0 @@
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: NFS_STORAGE_CLASS_NAME # managed-nfs-storage
-provisioner: SCIENCEDATA_PROVISIONER # sciencedata-provisioner # configured by run_pod.sh # or choose another name, must match deployment's env PROVISIONER_NAME'
-parameters:
-  pathPattern: "${.PVC.namespace}/${.PVC.annotations.nfs.io/storage-path}" # waits for nfs.io/storage-path annotation, if not specified will accept as empty string.
-  onDelete: "retain"
-reclaimPolicy: Retain
