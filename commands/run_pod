@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# run_pod.sh -o owner -k public_key -p storage_path yaml_file
-# E.g. run_pod.sh -o fror@dtu.dk -p testdir ubuntu_sciencedata.yaml
+# run_pod -o owner -k public_key -p storage_path yaml_file
+# E.g. run_pod -o fror@dtu.dk -p www ubuntu_sciencedata.yaml
 
 EXTERNAL_IP=130.226.137.130
-SCIENCEDATA_WS_IP=10.0.0.13
+SCIENCEDATA_IP=10.0.0.13
 
 DIR="$(dirname "$(readlink -f "$0")")"
 
@@ -94,8 +94,19 @@ owner_str=`echo $owner | sed 's|[@._]|-|g'`
 pod_name=`cat "$yaml_file" | yq -r .metadata.name | head -1`"-${owner_str}"
 
 if [ -n "$storage_path" ]; then
-	# Check if there's an NFS volume for $owner
-	home_server=`curl --insecure "https://$SCIENCEDATA_WS_IP/apps/files_sharding/ws/get_user_server.php?user_id=$owner&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||'`
+	# Check if $owner has a home server configured, otherwise default to $SCIENCEDATA_IP
+	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||'`
+	if [ ! $home_server ]; then
+		home_server=$SCIENCEDATA_IP
+	fi
+	# Check if directory exists
+	dir_exists_http_code=`curl --insecure -H "Depth: 0" -X PROPFIND -o /dev/null -w "%{http_code}" \
+	-u ${owner}: "https://${home_server}/storage/${storage_path}/"`
+	# Create if not
+	if [ "$dir_exists_http_code" != "207" ] && [ -z "$dryrun" ]; then
+		echo INFO: "https://${home_server}/storage/${storage_path}/ does NOT exist" >&2
+		curl --insecure -X MKCOL -u ${owner}: "https://${home_server}/storage/${storage_path}/"
+	fi
 	if [ $home_server ]; then
 		kubectl get persistentvolume | grep "nfs-${home_server}-${owner_str}" >& /dev/null
 		if [ "$?" -ne "0" ]; then
@@ -134,7 +145,7 @@ if [ -n "$pod_name" ]; then
 			echo "---"
 			cat "$NFS_VOLUME_YAML_FILE" | \
 			sed "s|NFS_VOLUME_NAME|nfs-${home_server}-${owner_str}|g" | \
-			sed "s|STORAGE_PATH|$storage_path|g" | \
+			sed "s|STORAGE_PATH|${owner}/${storage_path}|g" | \
 			sed "s|SERVER_IP|$home_server|g"
 		fi
 		### NFS persistent volume claim
@@ -152,7 +163,7 @@ fi
 
 if [ -z "$dryrun" ]; then
 	# Wait for one minut for pod to start
-	for reverse_proxy_port in {1..6}; do
+	for i in {1..60}; do
 		# Find local IP
 		podip=`kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||'`
 		if [ -n "$podip" ]; then
@@ -164,7 +175,7 @@ if [ -z "$dryrun" ]; then
 		sleep 10
 	done
 	if [ -z "$podip" ]; then
-		echo "ERROR: pod $pod_name did not start. Not running reverse proxy."
+		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to $podip:80."
 	fi
 fi
 

@@ -21,3 +21,4 @@ spec:
     - name: SSH_PUBLIC_KEY
       value: ""
   restartPolicy: Never
+  

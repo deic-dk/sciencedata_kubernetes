@@ -14,5 +14,5 @@ spec:
     - hard
     - nfsvers=4.1
   nfs:
-    path: /tank/storage/test2/STORAGE_PATH # will be configured by run_pod.sh
+    path: /tank/storage/STORAGE_PATH # will be configured by run_pod.sh
     server: SERVER_IP # will be configured by run_pod.sh

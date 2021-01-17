@@ -3,7 +3,7 @@
 user="$@"
 
 echo "###"
-echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age(s)|status|ssh_port"
+echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age(s)|status|ssh_port|https_port"
 echo "###"
 kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
 	podJson="`kubectl get pod "$pod" -o json`"
@@ -27,12 +27,13 @@ kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
 	if [ -n "$user" -a "$user" != "$owner" ]; then
 		continue
 	fi
-	
-	nodePort=`kubectl get service "${pod}-ssh" -o json 2>/dev/null | jq .spec.ports[].nodePort`
-	
+	nodePort=`kubectl get service "${pod}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
+	reverseProxyPort=`echo "$podJson" | jq -r '.metadata.labels.reverseProxyPort'`
+
 	kubectl get pod "$pod" -o json | jq -r --arg POD "$pod" --arg HOSTIP "$hostip" --arg PODIP "$podip" \
-	--arg OWNER "$owner" --arg AGE "$diffSeconds" --arg STATUS "$status" --arg NODEPORT "$nodePort" \
-	'.spec.containers[] | $POD+"|"+.name+"|"+.image+"|"+$PODIP+"|"+$HOSTIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS+"|"+$NODEPORT'
+	--arg OWNER "$owner" --arg AGE "$diffSeconds" --arg STATUS "$status" --arg NODEPORT "$nodePort"  \
+	--arg REVERSEPROXYPORT "$reverseProxyPort"\
+	'.spec.containers[] | $POD+"|"+.name+"|"+.image+"|"+$PODIP+"|"+$HOSTIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS+"|"+$NODEPORT+"|"+$REVERSEPROXYPORT'
 done | sed 's|@$||'
 
 #kubectl label pod twocontainers domain=

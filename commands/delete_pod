@@ -49,13 +49,13 @@ fi
 
 $run kubectl delete service "$ssh_service_name"
 
-### Clean up NFS storage claim, class, deployment
+### Clean up NFS storage claim, volume
 
 # Find claim name
 claim_name=`kubectl get pod "$pod_name" -o json | jq -r '.spec.volumes[] | select(.name == "sciencedata") | .persistentVolumeClaim.claimName'`
 $run kubectl delete pod "$pod_name"
 if [ $claim_name ]; then
-	# Check if others are using the claim
+	# Check if other pods are using the claim
 	while read line; do
 		name=`echo $line | awk '{print $1}'`
 		if ! [ $name ]; then
@@ -67,50 +67,30 @@ if [ $claim_name ]; then
 		  claim_active="yes"
 		  break
 		fi
-	done < <( kubectl get pods | grep -Ev '^NAME ' | grep -Ev "^$pod_name" )
+	done < <( kubectl get pods 2>/dev/null | grep -Ev '^NAME ' | grep -Ev "^$pod_name" )
 fi
 
 if ! [ $claim_active ]; then
-	# Find storage class name
-	storage_class=`kubectl get persistentvolumeclaim "$claim_name" -o json | jq -r ".spec.storageClassName"`
+	# Find volume name
+	volume_name=`kubectl get persistentvolumeclaim "$claim_name" -o json | jq -r ".spec.volumeName"`
 	$run kubectl delete persistentvolumeclaim "$claim_name"
-	# Check if storageclass is used by other claims
+	# Check if volume is used by other claims
 	while read line; do
 		name=`echo $line | awk '{print $1}'`
 		if ! [ $name ]; then
 			continue
 		fi
-		class=`echo $line | awk '{print $7}'`
-		if [ "$class" == "$storage_class" ]; then
-		  echo "Storage class used by other claim" >&2
-		  class_active="yes"
+		volume=`echo $line | awk '{print $3}'`
+		if [ "$volume" == "$volume_name" ]; then
+		  echo "Volume class used by other claim" >&2
+		  volume_active="yes"
 		  break
 		fi
-	done < <( kubectl get persistentvolumeclaims | grep -Ev '^NAME ' | grep -Ev "^$claim_name" )
+	done < <( kubectl get persistentvolumeclaims 2>/dev/null | grep -Ev '^NAME ' | grep -Ev "^$claim_name" )
 fi
 
-if ! [ $claim_active ] && ! [ $class_active ]; then
-	# find nfs deployment name
-	provisioner_name=`kubectl get storageclass "$storage_class" -o json | jq -r ".provisioner"`
-	$run kubectl delete storageclass "$storage_class"
-	# Check if deployment is used by other storage classes
-	while read line; do
-		name=`echo $line | awk '{print $1}'`
-		if ! [ $name ]; then
-			continue
-		fi
-		provisioner=`kubectl get storageclass "$name" -o json |  jq -r ".provisioner"`
-		if [ "$provisioner" == "$provisioner_name" ]; then
-		  echo "Deployment class used by other storage class" >&2
-		  deployment_active="yes"
-		  break
-		fi
-	done < <( kubectl get storageclasses | grep -Ev '^NAME ' | grep -Ev "^$storage_class" )
-fi
-
-if ! [ $claim_active ] && ! [ $class_active ]  && ! [ $deployment_active ]; then
-	deployment_name=`kubectl get deployment -o json | jq -r ".items[] | select(.spec.template.spec.containers[].env[].name==\"PROVISIONER_NAME\") | select(.spec.template.spec.containers[].env[].value==\"$provisioner_name\") | .metadata.name"`
-	$run kubectl delete deployment "$deployment_name"
+if ! [ $claim_active ] && ! [ $volume_active ] && [ $volume_name ]; then
+	$run kubectl delete persistentvolume "$volume_name"
 fi
 
 
