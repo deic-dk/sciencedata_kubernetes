@@ -6,11 +6,14 @@
 EXTERNAL_IP=130.226.137.130
 SCIENCEDATA_IP=10.0.0.13
 
-DIR="$(dirname "$(readlink -f "$0")")"
+cmd="`echo $(readlink -f \"$0\")`"
+DIR="`dirname $cmd`"
 
 SSH_SERVICE_YAML_FILE="$DIR/../service_manifests/ssh_service.yaml"
 NFS_VOLUME_YAML_FILE="$DIR/../service_manifests/nfs_volume.yaml"
 NFS_CLAIM_YAML_FILE="$DIR/../service_manifests/nfs_claim.yaml"
+CADDY_FILE="$DIR/../service_manifests/Caddyfile"
+TMPDIR="/tmp"
 
 yaml_file=""
 owner=""
@@ -56,6 +59,13 @@ if [ -z "$owner" ]; then
 	exit -1
 fi
 
+# Check if the user is attempting to use the host network
+grep -iE 'hostnetwork' "$yaml_file"
+if [ $? -eq 0 ]; then
+	echo "ERROR: Only internal network allowed" >&2
+	exit -2
+fi
+
 # Check if the user is attempting an NFS volume deployment (mount)
 grep -iE 'kind: *Deployment' "$yaml_file"
 if [ $? -eq 0 ]; then
@@ -63,7 +73,7 @@ if [ $? -eq 0 ]; then
 	exit -2
 fi
 
-# Check if there's an NFS persistentVolumeClaim claim in the pod yaml
+# Check if there is an NFS persistentVolumeClaim claim in the pod yaml
 grep -E '^ claimName: sciencedata-nfs-claim' "$yaml_file"
 if [ "$?" -eq "0" ]; then
 	echo "ERROR: Manual claims are not allowed" >&2
@@ -75,7 +85,7 @@ if [ -z "$ssh_public_key" ]; then
 	ssh_public_key="$SSH_PUBLIC_KEY"
 	if [ -z "$ssh_public_key" ]; then
 		# Try getting ssh public key from yaml
-		ssh_public_key="`cat "$yaml_file" | yq -r '.spec.containers[]?.env[]? | select(.name == "SSH_PUBLIC_KEY") | .value'`"
+		ssh_public_key="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value'`"
 		if [ -z "$ssh_public_key" ]; then
 			echo "WARNING: No SSH public key - it will not be possible to log in" >&2kill "$pid"
 		fi
@@ -91,7 +101,21 @@ user=`echo $owner | awk -F@ '{print $1}'`
 domain=`echo $owner | awk -F@ '{print $2}'`
 owner_str=`echo $owner | sed 's|[@._]|-|g'`
 
-pod_name=`cat "$yaml_file" | yq -r .metadata.name | head -1`"-${owner_str}"
+pod_name="`cat \"$yaml_file\" | yq -r .metadata.name | head -1`-${owner_str}"
+
+# Try up to 9 times to append to name if pod with this name is already running (i.e. allow 10 copies per user)
+new_pod_name="${pod_name}"
+for i in {1..9}; do
+	kubectl get pod "$new_pod_name" >& /dev/null
+	if [ $? -eq 0 ]; then
+		new_pod_name="${pod_name}-${i}"
+	else
+		break
+	fi
+done
+if [ -n "$new_pod_name" ] && [ "$new_pod_name" != "$pod_name" ]; then
+	pod_name="$new_pod_name"
+fi
 
 if [ -n "$storage_path" ]; then
 	# Check if $owner has a home server configured, otherwise default to $SCIENCEDATA_IP
@@ -122,7 +146,7 @@ fi
 
 # Find free port for Caddy proxy in range 2000-3000
 for reverse_proxy_port in {2000..3000}; do
-	ps auxw | grep -v grep | grep -v "caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port" >& /dev/null && break
+	ps auxw | grep "caddy reverse-proxy" | grep -v grep | grep -v "caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port" >& /dev/null && break
 done
 
 if [ -n "$pod_name" ]; then
@@ -169,7 +193,10 @@ if [ -z "$dryrun" ]; then
 		if [ -n "$podip" ]; then
 			# Run Caddy reverse proxy
 			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to $podip:80" >&2
-			caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to $podip:80 >& /dev/null &
+			#caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to $podip:80 >& /dev/null &
+			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${podip}"
+			sed -i "s|PODIP|$podip|" "$TMPDIR/Caddyfile-${podip}"
+			caddy start -config "$TMPDIR/Caddyfile-${podip}"
 			break
 		fi
 		sleep 10

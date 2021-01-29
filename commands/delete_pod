@@ -5,6 +5,9 @@
 user=""
 run=""
 
+TMPDIR="/tmp"
+
+
 while getopts "u:d" flag; do
 	case "$flag" in
 		u)
@@ -40,11 +43,14 @@ fi
 
 
 # First find the IP of the pod
-ip=`$DIR/get_containers | grep "^$pod_name|" | awk -F'|' '{print $4}' | tr -d '\n'`
+ip=`$DIR/get_containers | grep -E "^$pod_name\|" | awk -F'|' '{print $4}' | tr -d '\n'`
 # Kill reverse proxy
 if [ -n "$ip" ]; then
-	pid=`ps auxw | grep -v grep | grep -E "caddy reverse-proxy --from https://kube.sciencedata.dk:[0-9]+ --to $ip:80" | awk '{print $2}'`
-	$run kill "$pid"
+	pid=`ps auxw | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-${ip}"  | grep -v grep | awk '{print $2}'`
+	if [ -n $pid ]; then
+		$run kill "$pid"
+		rm "$TMPDIR/Caddyfile-${ip}"
+	fi
 fi
 
 $run kubectl delete service "$ssh_service_name"

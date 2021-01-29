@@ -3,12 +3,14 @@ kind: Service
 metadata:
   name: ubuntu-focal-ssh
 spec:
-  externalIPs:
-    - kube.sciencedata.dk
-  type: NodePort
+  #externalIPs:
+  #  - kube.sciencedata.dk
+  #type: NodePort
+  type: LoadBalancer
   ports:
   - port: 22
     targetPort: 22
+    name: ssh
     protocol: TCP
   selector:
     app: ubuntu

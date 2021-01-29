@@ -1,0 +1,10 @@
+{
+	auto_https disable_redirects
+	admin off
+}
+
+https://kube.sciencedata.dk:WEBPORT
+
+reverse_proxy {
+    to PODIP:80
+}

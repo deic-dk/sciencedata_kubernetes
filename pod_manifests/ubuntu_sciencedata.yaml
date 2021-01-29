@@ -5,6 +5,8 @@ metadata:
   labels:
     app: ubuntu
     reverseProxyPort: 443
+  annotations:
+    security.alpha.kubernetes.io/sysctls: net.ipv4.ping_group_range=0 2147483647
 spec:
   containers:
   - name: ubuntu-focal
@@ -21,4 +23,4 @@ spec:
     - name: SSH_PUBLIC_KEY
       value: ""
   restartPolicy: Never
-  
+  nodeName: worker1
