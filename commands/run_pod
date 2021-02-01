@@ -87,7 +87,8 @@ if [ -z "$ssh_public_key" ]; then
 		# Try getting ssh public key from yaml
 		ssh_public_key="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value'`"
 		if [ -z "$ssh_public_key" ]; then
-			echo "WARNING: No SSH public key - it will not be possible to log in" >&2kill "$pid"
+			echo "WARNING: No SSH public key - it will not be possible to log in" >&2kill "$pid"				return false;
+
 		fi
 	fi
 fi
@@ -146,13 +147,20 @@ fi
 
 # Find free port for Caddy proxy in range 2000-3000
 for reverse_proxy_port in {2000..3000}; do
-	ps auxw | grep "caddy reverse-proxy" | grep -v grep | grep -v "caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port" >& /dev/null && break
+	ps aux | grep "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-" >& /dev/null || break
+	ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -Ev "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" && break
 done
+
+# This is picked up by start.sh inside the container (for ScienceData-enabled containers)
+if [ $home_server ]; then
+	export my_home_server=`echo $home_server | sed 's|^10\.0\.|10.2.|'`
+fi
 
 if [ -n "$pod_name" ]; then
 	### Modify pod YAML - ssh public key, metadata, volume
 	( cat $yaml_file | \
-	yq -r "(select(.spec.containers[]?.env[]?.name == \"SSH_PUBLIC_KEY\") | .spec.containers[].env[].value=\"$ssh_public_key\")"  | \
+	yq -r "(.spec.containers[].env[] | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
+	yq -r "(.spec.containers[].env[] | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
 	yq -r -y ".metadata.name=\"$pod_name\"" |\
 	yq -r -y ".metadata.labels.user=\"$user\"" | \
 	yq -r -y ".metadata.labels.domain=\"$domain\"" |\
@@ -194,9 +202,9 @@ if [ -z "$dryrun" ]; then
 			# Run Caddy reverse proxy
 			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to $podip:80" >&2
 			#caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to $podip:80 >& /dev/null &
-			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${podip}"
-			sed -i "s|PODIP|$podip|" "$TMPDIR/Caddyfile-${podip}"
-			caddy start -config "$TMPDIR/Caddyfile-${podip}"
+			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${podip}-${reverse_proxy_port}"
+			sed -i "s|PODIP|$podip|" "$TMPDIR/Caddyfile-${podip}-${reverse_proxy_port}"
+			caddy start -config "$TMPDIR/Caddyfile-${podip}-${reverse_proxy_port}"
 			break
 		fi
 		sleep 10

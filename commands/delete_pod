@@ -44,12 +44,13 @@ fi
 
 # First find the IP of the pod
 ip=`$DIR/get_containers | grep -E "^$pod_name\|" | awk -F'|' '{print $4}' | tr -d '\n'`
+
 # Kill reverse proxy
 if [ -n "$ip" ]; then
-	pid=`ps auxw | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-${ip}"  | grep -v grep | awk '{print $2}'`
+	pid=`ps auxw | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-${ip}-.*"  | grep -v grep | awk '{print $2}'`
 	if [ -n $pid ]; then
 		$run kill "$pid"
-		rm "$TMPDIR/Caddyfile-${ip}"
+		#rm "$TMPDIR/Caddyfile-${ip}-"*
 	fi
 fi
 
@@ -73,7 +74,7 @@ if [ $claim_name ]; then
 		  claim_active="yes"
 		  break
 		fi
-	done < <( kubectl get pods 2>/dev/null | grep -Ev '^NAME ' | grep -Ev "^$pod_name" )
+	done < <( kubectl get pods 2>/dev/null | grep -Ev '^NAME ' | awk '{print $1}' | grep -Ev "^$pod_name$" )
 fi
 
 if ! [ $claim_active ]; then
@@ -92,7 +93,7 @@ if ! [ $claim_active ]; then
 		  volume_active="yes"
 		  break
 		fi
-	done < <( kubectl get persistentvolumeclaims 2>/dev/null | grep -Ev '^NAME ' | grep -Ev "^$claim_name" )
+	done < <( kubectl get persistentvolumeclaims 2>/dev/null | grep -Ev '^NAME '  | awk '{print $1}' | grep -Ev "^$claim_name$" )
 fi
 
 if ! [ $claim_active ] && ! [ $volume_active ] && [ $volume_name ]; then

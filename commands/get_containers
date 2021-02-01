@@ -2,9 +2,9 @@
 
 user="$@"
 
-echo "###"
-echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age(s)|status|ssh_port|https_port"
-echo "###"
+echo "###" >&2
+echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age(s)|status|ssh_port|https_port" >&2
+echo "###" >&2
 kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
 	podJson="`kubectl get pod "$pod" -o json`"
 	hostip=`echo "$podJson" | jq -r '.status.hostIP' | sed 's|null||'`

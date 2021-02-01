@@ -22,5 +22,7 @@ spec:
     env:
     - name: SSH_PUBLIC_KEY
       value: ""
+    - name: HOME_SERVER
+      value: ""
   restartPolicy: Never
   nodeName: worker1
