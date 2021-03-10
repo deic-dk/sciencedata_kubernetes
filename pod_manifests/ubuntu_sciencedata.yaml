@@ -4,7 +4,6 @@ metadata:
   name: ubuntu-focal
   labels:
     app: ubuntu
-    reverseProxyPort: 443
   annotations:
     security.alpha.kubernetes.io/sysctls: net.ipv4.ping_group_range=0 2147483647
 spec:
@@ -25,4 +24,4 @@ spec:
     - name: HOME_SERVER
       value: ""
   restartPolicy: Never
-  nodeName: worker1
+  #  nodeName: worker1

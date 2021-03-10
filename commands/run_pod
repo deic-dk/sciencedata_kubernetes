@@ -1,7 +1,9 @@
 #!/bin/bash
 
-# run_pod -o owner -k public_key -p storage_path yaml_file
-# E.g. run_pod -o fror@dtu.dk -p www ubuntu_sciencedata.yaml
+# run_pod -o owner -k public_key -p nfs_storage_path yaml_file
+# E.g.
+# run_pod -o fror@dtu.dk -r www ubuntu_sciencedata.yaml
+# run_pod -o fror@dtu.dk -l /usr/local/software -p 8888 jupyter_sciencedata.yaml
 
 EXTERNAL_IP=130.226.137.130
 SCIENCEDATA_IP=10.0.0.13
@@ -12,16 +14,18 @@ DIR="`dirname $cmd`"
 SSH_SERVICE_YAML_FILE="$DIR/../service_manifests/ssh_service.yaml"
 NFS_VOLUME_YAML_FILE="$DIR/../service_manifests/nfs_volume.yaml"
 NFS_CLAIM_YAML_FILE="$DIR/../service_manifests/nfs_claim.yaml"
+LOCAl_VOLUME_YAML_FILE="$DIR/../service_manifests/local_volume.yaml"
+LOCAL_CLAIM_YAML_FILE="$DIR/../service_manifests/local_claim.yaml"
 CADDY_FILE="$DIR/../service_manifests/Caddyfile"
 TMPDIR="/tmp"
 
 yaml_file=""
 owner=""
 ssh_public_key=""
-storage_path=""
+nfs_storage_path=""
 dryrun=
 
-while getopts "o:k:p:d" flag; do
+while getopts "o:k:r:l:p:d" flag; do
 	case "$flag" in
 		o)
 			# ScienceData userid who will own the pod
@@ -31,10 +35,20 @@ while getopts "o:k:p:d" flag; do
 			# Public key to be inserted into /root/.ssh/authorized_keys
 			ssh_public_key=$OPTARG
 			;;
-		p)
+		r)
 			# Path on home server to be claimed, relative to /tank/storage/owner/
 			# Notice that the mountpoint is specified in the pod yaml
-			storage_path=$OPTARG
+			nfs_storage_path=$OPTARG
+			;;
+		l)
+			# Path on local server to be claimed - absolute.
+			# Notice that the mountpoint is specified in the pod yaml
+			local_storage_path=$OPTARG
+			;;
+		p)
+			# Port of web server running in the pod, i.e.
+			# the port that will be proxied to
+			pod_port=$OPTARG
 			;;
 		d)
 			# If set, no actions are performed, only reported
@@ -59,6 +73,10 @@ if [ -z "$owner" ]; then
 	exit -1
 fi
 
+if [ -z "$pod_port" ]; then
+	pod_port=80
+fi
+
 # Check if the user is attempting to use the host network
 grep -iE 'hostnetwork' "$yaml_file"
 if [ $? -eq 0 ]; then
@@ -73,8 +91,8 @@ if [ $? -eq 0 ]; then
 	exit -2
 fi
 
-# Check if there is an NFS persistentVolumeClaim claim in the pod yaml
-grep -E '^ claimName: sciencedata-nfs-claim' "$yaml_file"
+# Check if there is a persistentVolumeClaim claim in the pod yaml
+grep -E '^ claimName:' "$yaml_file"
 if [ "$?" -eq "0" ]; then
 	echo "ERROR: Manual claims are not allowed" >&2
 	exit -3
@@ -104,7 +122,7 @@ owner_str=`echo $owner | sed 's|[@._]|-|g'`
 
 pod_name="`cat \"$yaml_file\" | yq -r .metadata.name | head -1`-${owner_str}"
 
-# Try up to 9 times to append to name if pod with this name is already running (i.e. allow 10 copies per user)
+# Try up to 9 times to append to name if pod with this name is already running (i.service/jupyter-fror-dtu-dk-sshe. allow 10 copies per user)
 new_pod_name="${pod_name}"
 for i in {1..9}; do
 	kubectl get pod "$new_pod_name" >& /dev/null
@@ -118,37 +136,54 @@ if [ -n "$new_pod_name" ] && [ "$new_pod_name" != "$pod_name" ]; then
 	pod_name="$new_pod_name"
 fi
 
-if [ -n "$storage_path" ]; then
-	# Check if $owner has a home server configured, otherwise default to $SCIENCEDATA_IP
-	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||'`
+# Check if $owner has a home server configured, otherwise default to $SCIENCEDATA_IP
+home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||'`
+
+if [ -n "$nfs_storage_path" ]; then
 	if [ ! $home_server ]; then
 		home_server=$SCIENCEDATA_IP
 	fi
 	# Check if directory exists
 	dir_exists_http_code=`curl --insecure -H "Depth: 0" -X PROPFIND -o /dev/null -w "%{http_code}" \
-	-u ${owner}: "https://${home_server}/storage/${storage_path}/"`
+	-u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/"`
 	# Create if not
 	if [ "$dir_exists_http_code" != "207" ] && [ -z "$dryrun" ]; then
-		echo INFO: "https://${home_server}/storage/${storage_path}/ does NOT exist" >&2
-		curl --insecure -X MKCOL -u ${owner}: "https://${home_server}/storage/${storage_path}/"
+		echo INFO: "https://${home_server}/storage/${nfs_storage_path}/ does NOT exist" >&2
+		curl --insecure -X MKCOL -u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/"
 	fi
 	if [ $home_server ]; then
 		kubectl get persistentvolume | grep "nfs-${home_server}-${owner_str}" >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_volume="yes"
 		fi
-		# Check if a claim has already been made on $storage_path
-		kubectl get PersistentVolumeClaim | grep  "nfs-${home_server}-${owner_str}-${storage_path}" >& /dev/null
+		# Check if a claim has already been made on $nfs_storage_path
+		kubectl get PersistentVolumeClaim | grep  "nfs-${home_server}-${owner_str}-${nfs_storage_path}" >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_claim="yes"
 		fi
 	fi
 fi
 
+if [ -n "$local_storage_path" ]; then
+	local_storage_name=`echo $local_storage_path | sed 's|/|-|g'`
+	# Check if directory exists
+	if [ -d "$local_storage_path" ]; then
+		kubectl get persistentvolume | grep "local-${local_storage_name}" >& /dev/null
+		if [ "$?" -ne "0" ]; then
+			create_local_volume="yes"
+		fi
+	fi
+	# Check if a claim has already been made on $local_storage_path
+	kubectl get PersistentVolumeClaim | grep  "local-claim-${local_storage_name}" >& /dev/null
+	if [ "$?" -ne "0" ]; then
+		create_local_claim="yes"
+	fi
+fi
+
 # Find free port for Caddy proxy in range 2000-3000
 for reverse_proxy_port in {2000..3000}; do
 	ps aux | grep "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-" >& /dev/null || break
-	ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -Ev "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" && break
+	ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" >&/dev/null || break
 done
 
 # This is picked up by start.sh inside the container (for ScienceData-enabled containers)
@@ -159,32 +194,49 @@ fi
 if [ -n "$pod_name" ]; then
 	### Modify pod YAML - ssh public key, metadata, volume
 	( cat $yaml_file | \
-	yq -r "(.spec.containers[].env[] | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
-	yq -r "(.spec.containers[].env[] | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
+	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
+	yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
+	sed "s|HOME_SERVER/storage/mathpass|${my_home_server}/storage/mathpass|" | \
 	yq -r -y ".metadata.name=\"$pod_name\"" |\
 	yq -r -y ".metadata.labels.user=\"$user\"" | \
 	yq -r -y ".metadata.labels.domain=\"$domain\"" |\
 	yq -r -y ".metadata.labels.app=\"$pod_name\"" | \
 	yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" |\
-	( [ -z "$storage_path" ] && cat || yq -r -y ".spec.volumes=[{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"nfs-${home_server}-${owner_str}-${storage_path}\"}}]")
+	( [ -z "$nfs_storage_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"nfs-${home_server}-${owner_str}-${nfs_storage_path}\"}}]") |\
+	( [ -z "$local_storage_name" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"local\", \"persistentVolumeClaim\": {\"claimName\": \"local-claim-${local_storage_name}\"}}]")
 	### SSH service
 	echo "---"
 	cat "$SSH_SERVICE_YAML_FILE"| yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
 	yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
-	if [ -n "$storage_path" ]; then
+	if [ -n "$nfs_storage_path" ]; then
 		### NFS volume
 		if [ -n "$create_nfs_volume" ]; then
 			echo "---"
 			cat "$NFS_VOLUME_YAML_FILE" | \
 			sed "s|NFS_VOLUME_NAME|nfs-${home_server}-${owner_str}|g" | \
-			sed "s|STORAGE_PATH|${owner}/${storage_path}|g" | \
+			sed "s|STORAGE_PATH|${owner}/${nfs_storage_path}|g" | \
 			sed "s|SERVER_IP|$home_server|g"
 		fi
 		### NFS persistent volume claim
 		if [ -n "$create_nfs_claim" ]; then
 			echo "---"
 			cat "$NFS_CLAIM_YAML_FILE" | \
-			sed "s|NFS_CLAIM_NAME|nfs-${home_server}-${owner_str}-${storage_path}|g"
+			sed "s|NFS_CLAIM_NAME|nfs-${home_server}-${owner_str}-${nfs_storage_path}|g"
+		fi
+	fi
+	if [ -n "$local_storage_name" ]; then
+		### Local volume
+		if [ -n "$create_local_volume" ]; then
+			echo "---"
+			cat "$LOCAl_VOLUME_YAML_FILE" | \
+			sed "s|LOCAL_VOLUME_NAME|local-${local_storage_name}|g" | \
+			sed "s|STORAGE_PATH|${local_storage_path}|g"
+		fi
+		### Local persistent volume claim
+		if [ -n "$create_local_claim" ]; then
+			echo "---"
+			cat "$LOCAL_CLAIM_YAML_FILE" | \
+			sed "s|LOCAL_CLAIM_NAME|local-claim-${local_storage_name}|g"
 		fi
 	fi
 	) | tee >([ -z "$dryrun" ] && kubectl apply -f - || kubectl apply --validate=true --dry-run=client -f -)
@@ -197,20 +249,23 @@ if [ -z "$dryrun" ]; then
 	# Wait for one minut for pod to start
 	for i in {1..60}; do
 		# Find local IP
-		podip=`kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||'`
-		if [ -n "$podip" ]; then
+		pod_ip=`kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||'`
+		if [ -n "$pod_ip" ]; then
 			# Run Caddy reverse proxy
-			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to $podip:80" >&2
-			#caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to $podip:80 >& /dev/null &
-			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${podip}-${reverse_proxy_port}"
-			sed -i "s|PODIP|$podip|" "$TMPDIR/Caddyfile-${podip}-${reverse_proxy_port}"
-			caddy start -config "$TMPDIR/Caddyfile-${podip}-${reverse_proxy_port}"
+			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_port}" >&2
+			#caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_port} >& /dev/null &
+			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			sed -i "s|PODIP|$pod_ip|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			sed -i "s|PODPORT|$pod_port|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			caddy start -config "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
+			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
 			break
 		fi
 		sleep 10
 	done
-	if [ -z "$podip" ]; then
-		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to $podip:80."
+	if [ -z "$pod_ip" ]; then
+		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_port}."
 	fi
 fi
 

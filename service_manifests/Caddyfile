@@ -6,5 +6,5 @@
 https://kube.sciencedata.dk:WEBPORT
 
 reverse_proxy {
-    to PODIP:80
+    to PODIP:PODPORT
 }
