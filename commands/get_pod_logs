@@ -1,0 +1,40 @@
+#!/bin/bash
+
+user=""
+run=""
+
+while getopts "u:d" flag; do
+	case "$flag" in
+		u)
+			user=$OPTARG
+			;;
+		d)
+			run="echo"
+			;;
+		\?)
+			echo "Invalid option: -$OPTARG" >&2
+			exit 1
+		;;
+		:)
+			echo "Option -$OPTARG requires an argument." >&2
+			exit 1
+		;;
+	esac
+done
+
+pod_name=${@:$OPTIND:1}
+
+DIR="$(dirname "$(readlink -f "$0")")"
+
+# If user is given, check that user owns pod
+if [ -n "$user" ]; then
+	owner=`$DIR/get_containers | grep "^$pod_name|" | awk -F'|' '{print $6}'`
+#	echo $owner
+	if [[ "$owner" != "" && "$owner" != "$user" ]]; then
+		echo "ERROR: pod $pod_name owned by $owner, NOT $user" >&2
+		exit 1
+	fi
+fi
+
+$run kubectl logs "$pod_name"
+

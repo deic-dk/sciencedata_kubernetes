@@ -1,9 +1,10 @@
 #!/bin/bash
 
-# run_pod -o owner -k public_key -p nfs_storage_path yaml_file
+# run_pod -o owner -k public_key -r nfs_storage_path -l local_storage_path yaml_file
+# Notice that the mount point for the nfs and/or local volume must be specified in the yaml file.
 # E.g.
-# run_pod -o fror@dtu.dk -r www ubuntu_sciencedata.yaml
-# run_pod -o fror@dtu.dk -l /usr/local/software -p 8888 jupyter_sciencedata.yaml
+# run_pod -o fror@dtu.dk  -k "`cat ~/.ssh/id_rsa.pub`" -r www /root/sciencedata_kubernetes/pod_manifests/ubuntu_sciencedata.yaml
+# run_pod -o fror@dtu.dk -l /usr/local/software -p 8888 /root/sciencedata_kubernetes/pod_manifests/jupyter_sciencedata.yaml
 
 EXTERNAL_IP=130.226.137.130
 SCIENCEDATA_IP=10.0.0.13
@@ -68,6 +69,21 @@ done
 yaml_file=${@:$OPTIND:1}
 #EXTRA_ARG=${@:$OPTIND+1:1}
 
+if [ -z "$yaml_file" ]; then
+	echo "ERROR: Need input file" >&2
+	exit 1
+fi
+
+if [ ! -f "$yaml_file" ]; then
+	echo "ERROR: Input file not found" >&2
+	exit 1
+fi
+
+if [ ! -s "$yaml_file" ]; then
+	echo "ERROR: Input file is empty" >&2
+	exit 1
+fi
+
 if [ -z "$owner" ]; then
 	echo "ERROR: Need owner"  >&2
 	exit -1
@@ -105,15 +121,9 @@ if [ -z "$ssh_public_key" ]; then
 		# Try getting ssh public key from yaml
 		ssh_public_key="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value'`"
 		if [ -z "$ssh_public_key" ]; then
-			echo "WARNING: No SSH public key - it will not be possible to log in" >&2kill "$pid"				return false;
-
+			echo "WARNING: No SSH public key - it will not be possible to log in" >&2
 		fi
 	fi
-fi
-
-if [ -z "$yaml_file" ]; then
-	echo "ERROR: Need input file" >&2
-	exit 1
 fi
 
 user=`echo $owner | awk -F@ '{print $1}'`
@@ -205,9 +215,11 @@ if [ -n "$pod_name" ]; then
 	( [ -z "$nfs_storage_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"nfs-${home_server}-${owner_str}-${nfs_storage_path}\"}}]") |\
 	( [ -z "$local_storage_name" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"local\", \"persistentVolumeClaim\": {\"claimName\": \"local-claim-${local_storage_name}\"}}]")
 	### SSH service
-	echo "---"
-	cat "$SSH_SERVICE_YAML_FILE"| yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
-	yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
+	if [ -n "$ssh_public_key" ]; then
+		echo "---"
+		cat "$SSH_SERVICE_YAML_FILE"| yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
+		yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
+	fi
 	if [ -n "$nfs_storage_path" ]; then
 		### NFS volume
 		if [ -n "$create_nfs_volume" ]; then

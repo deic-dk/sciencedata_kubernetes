@@ -34,8 +34,7 @@ DIR="$(dirname "$(readlink -f "$0")")"
 
 # If user is given, check that user owns pod
 if [ -n "$user" ]; then
-	owner=`$DIR/get_containers | grep "^$pod_name|" | awk -F'|' '{print $6}'`
-	echo $owner
+	owner=`$DIR/get_containers 2>&1 | grep "^$pod_name|" | awk -F'|' '{print $6}'`
 	if [[ "$owner" != "" && "$owner" != "$user" ]]; then
 		echo "ERROR: pod $pod_name owned by $owner, NOT $user" >&2
 		exit 1
@@ -43,12 +42,11 @@ if [ -n "$user" ]; then
 fi
 
 # First find the IP of the pod
-ip=`$DIR/get_containers | grep -E "^$pod_name\|" | awk -F'|' '{print $4}' | tr -d '\n'`
+ip=`$DIR/get_containers 2>&1 | grep -E "^$pod_name\|" | awk -F'|' '{print $4}' | tr -d '\n'`
 
 # Kill reverse proxy
 if [ -n "$ip" ]; then
 	pid=`ps auxw | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-${ip}-.*"  | grep -v grep | awk '{print $2}'`
-	echo $pid
 	if [[ -n $pid ]]; then
 		$run kill "$pid"
 		rm "$TMPDIR/Caddyfile-${ip}-"* >& /dev/null
@@ -58,16 +56,17 @@ fi
 
 $run kubectl delete service "$ssh_service_name"
 
-echo $pod_name
-$run kubectl delete pod "$pod_name"
-
 ### Clean up storage claims, volumes
 
-# Find claim names of this pod
-kubectl get pod "$pod_name" -o json | jq -r '.spec.volumes[] | select((.name == "sciencedata") or .name == "local") | .persistentVolumeClaim.claimName' |\
+# Find claims of this pod
+claims="`kubectl get pod "$pod_name" -o json | jq -r '.spec.volumes[] | select((.name == "sciencedata") or .name == "local") | .persistentVolumeClaim.claimName'`"
+
+# Now we can delete the pod
+$run kubectl delete pod "$pod_name"
+
+# Check claims and delete if not used
+echo "$claims" |\
 while read claim_name; do
-#	echo $pod_name
-#	$run kubectl delete pod "$pod_name"
 	if [ $claim_name ]; then
 		# Check if other pods are using the claim
 		while read line; do
@@ -108,4 +107,5 @@ while read claim_name; do
 	fi
 
 done
+
 

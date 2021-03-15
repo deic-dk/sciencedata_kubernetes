@@ -42,7 +42,7 @@ fwrite($tmpfile, $yaml);
 $metadata = stream_get_meta_data($tmpfile);
 $tmpfile_name = $metadata['uri'];
 
-exec('export KUBECONFIG=/etc/kubernetes/admin.conf; run_pod -o "'.$owner.'" -k "'.$public_key.'" -p "'.$storage_path.'" "'.$tmpfile_name.'"', $output, $retval);
+exec('export KUBECONFIG=/etc/kubernetes/admin.conf; run_pod -o "'.$owner.'" -k "'.$public_key.'" -r "'.$storage_path.'" "'.$tmpfile_name.'"', $output, $retval);
 
 fclose($tmpfile);
 
@@ -52,8 +52,8 @@ if($retval===0){
 }
 else{
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);
-	echo "<h1>Something went wrong!</h1>";
-	echo "<pre>$output</pre>";
+	echo "<h1>Something went wrong! Check existence of $url</h1>";
+	echo "<pre>".implode("\n", $output)."</pre>";
 }
 
 ?>
