@@ -26,11 +26,16 @@ ssh_public_key=""
 nfs_storage_path=""
 dryrun=
 
-while getopts "o:k:r:l:p:d" flag; do
+while getopts "o:s:k:r:l:p:d" flag; do
 	case "$flag" in
 		o)
 			# ScienceData userid who will own the pod
 			owner=$OPTARG
+			;;
+		s)
+			# Optional ScienceData home server of the userid who will own the pod
+			# Only necessary for local-only users
+			home_server=$OPTARG
 			;;
 		k)
 			# Public key to be inserted into /root/.ssh/authorized_keys
@@ -146,11 +151,13 @@ if [ -n "$new_pod_name" ] && [ "$new_pod_name" != "$pod_name" ]; then
 	pod_name="$new_pod_name"
 fi
 
-# Check if $owner has a home server configured, otherwise default to $SCIENCEDATA_IP
-home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||'`
-
+# Check if home_server is set, otherwise check if $owner has a home server configured, finally to $SCIENCEDATA_IP
+if [ -z $home_server ]; then
+	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||'`
+fi
+	
 if [ -n "$nfs_storage_path" ]; then
-	if [ ! $home_server ]; then
+	if [ -z $home_server ]; then
 		home_server=$SCIENCEDATA_IP
 	fi
 	# Check if directory exists
@@ -269,7 +276,8 @@ if [ -z "$dryrun" ]; then
 			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
 			sed -i "s|PODIP|$pod_ip|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
 			sed -i "s|PODPORT|$pod_port|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			caddy start -config "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			export PATH=/bin/:/usr/bin:/usr/local/bin
+			caddy start -config "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}" >& /dev/null &
 			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
 			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
 			break
