@@ -4,7 +4,7 @@ user="$@"
 TMPDIR="/tmp"
 
 echo "###" >&2
-echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age(s)|status|ssh_port|https_port|uri" >&2
+echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri" >&2
 echo "###" >&2
 kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
 	podJson="`kubectl get pod "$pod" -o json`"
@@ -15,7 +15,12 @@ kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
 	domain=`echo "$podJson" | jq -r '.metadata.labels | .domain' | sed -E 's|^null$||'`
 	# Crashed pods will also be in phase Running
 	state=`echo "$podJson" | jq -r '.status.phase'`
-	status=`echo "$podJson" | jq -r '.status.containerStatuses[].state[]  | join(", ")'`
+	# Unschedulable pods will have no .status.containerStatuses, but have .status.conditions[].message
+	message=`echo "$podJson" | jq -r '.status.conditions[]?.message?' | grep -E -v '^null$'`
+	status=`echo "$podJson" | jq -r '.status.containerStatuses[]?.state[]?  | join(", ")'`
+	if [[ -n "$message" ]] && [[ -z "$status" ]]; then
+		echo "WARNING: $pod has problems: $message" >&2
+	fi
 	echo "$status" | grep "," >& /dev/null
 	if [ $? -ne 0 ] && [ "$state" == "Running" ]; then
 		startTime=`echo "$podJson" | jq -r '.status.startTime'`
@@ -38,5 +43,5 @@ kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
 	kubectl get pod "$pod" -o json | jq -r --arg POD "$pod" --arg HOSTIP "$hostip" --arg PODIP "$podip" \
 	--arg OWNER "$owner" --arg AGE "$diffSeconds" --arg STATUS "${state}:${status}" --arg NODEPORT "$nodePort"  \
 	--arg REVERSEPROXYPORT "$reverseProxyPort" --arg URI "$uri" \
-	'.spec.containers[] | $POD+"|"+.name+"|"+.image+"|"+$PODIP+"|"+$HOSTIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS+"|"+$NODEPORT+"|"+$REVERSEPROXYPORT+"|"+$URI'
+	'.spec.containers[] | $POD+"|"+.name+"|"+.image+"|"+$PODIP+"|"+$HOSTIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS+"|"+$NODEPORT+"|"+ [.env[]|select(.name=="USERNAME")][0]?.value +"|"+$REVERSEPROXYPORT+"|"+$URI'
 done | sed 's|@$||'

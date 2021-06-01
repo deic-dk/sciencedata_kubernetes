@@ -169,9 +169,15 @@ if [ -n "$nfs_storage_path" ]; then
 		curl --insecure -X MKCOL -u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/"
 	fi
 	if [ $home_server ]; then
+		# Check if the volume is already mounted
 		kubectl get persistentvolume | grep "nfs-${home_server}-${owner_str}" >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_volume="yes"
+		else
+			kubectl get pv -o yaml | yq '.items[] | (.spec.nfs.server+":"+.spec.nfs.path)' | grep "${home_server}:/tank/storage/${owner_str}/${nfs_storage_path}" >& /dev/null
+			if [ "$?" -ne "0" ]; then
+				create_nfs_volume="yes"
+			fi
 		fi
 		# Check if a claim has already been made on $nfs_storage_path
 		kubectl get PersistentVolumeClaim | grep  "nfs-${home_server}-${owner_str}-${nfs_storage_path}" >& /dev/null
