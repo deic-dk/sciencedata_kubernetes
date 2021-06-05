@@ -54,7 +54,7 @@ while getopts "o:s:k:r:l:p:d" flag; do
 		p)
 			# Port of web server running in the pod, i.e.
 			# the port that will be proxied to
-			pod_port=$OPTARG
+			pod_http_port=$OPTARG
 			;;
 		d)
 			# If set, no actions are performed, only reported
@@ -94,10 +94,6 @@ if [ -z "$owner" ]; then
 	exit -1
 fi
 
-if [ -z "$pod_port" ]; then
-	pod_port=80
-fi
-
 # Check if the user is attempting to use the host network
 grep -iE 'hostnetwork' "$yaml_file"
 if [ $? -eq 0 ]; then
@@ -130,6 +126,28 @@ if [ -z "$ssh_public_key" ]; then
 		fi
 	fi
 fi
+
+if [ -z "$local_storage_path" ]; then
+	# No local storage path given on stdin, try getting it from env
+	local_storage_path="$LOCAL_STORAGE_PATH"
+	if [ -z "$local_storage_path" ]; then
+		# Try getting local storage path from yaml
+		local_storage_path="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"MOUNT_SRC\") | .value'`"
+	fi
+fi
+
+if [ -z "$pod_http_port" ]; then
+	# No local storage path given on stdin, try getting it from env
+	pod_http_port="$POD_HTTP_PORT"
+	if [ -z "$pod_http_port" ]; then
+		# Try getting POD HTTP port from yaml
+		pod_http_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"POD_HTTP_PORT\") | .value'`"
+		if [ -z "$pod_http_port" ]; then
+			pod_http_port=80
+		fi
+	fi
+fi
+
 
 user=`echo $owner | awk -F@ '{print $1}'`
 domain=`echo $owner | awk -F@ '{print $2}'`
@@ -277,21 +295,29 @@ if [ -z "$dryrun" ]; then
 		pod_ip=`kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||'`
 		if [ -n "$pod_ip" ]; then
 			# Run Caddy reverse proxy
-			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_port}" >&2
-			#caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_port} >& /dev/null &
+			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >&2
+			#caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port} >& /dev/null &
 			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
 			sed -i "s|PODIP|$pod_ip|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			sed -i "s|PODPORT|$pod_port|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			sed -i "s|PODPORT|$pod_http_port|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
 			export PATH=/bin/:/usr/bin:/usr/local/bin
 			caddy start -config "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}" >& /dev/null &
-			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
 			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
 			break
 		fi
 		sleep 10
 	done
 	if [ -z "$pod_ip" ]; then
-		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_port}."
+		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}."
+	else
+		# Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
+		( for i in {1..300}; do
+			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
+			sleep 10
+			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
+			[[ -e ${TMPDIR}/uri-${pod_name} ]] && [[ ! -s ${TMPDIR}/uri-${pod_name} ]] && rm ${TMPDIR}/uri-${pod_name}
+			[[ -s ${TMPDIR}/uri-${pod_name} ]] && break
+		done ) >& /dev/null &
 	fi
 fi
 
