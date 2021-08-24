@@ -24,4 +24,4 @@ spec:
     - name: HOME_SERVER
       value: ""
   restartPolicy: Never
-  #  nodeName: worker1
+  #nodeName: worker1

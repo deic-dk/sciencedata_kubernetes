@@ -1,9 +1,10 @@
 #!/bin/bash
 
-# run_pod -o owner -k public_key -p nfs_storage_path yaml_file
+# run_pod -o owner -k public_key -r nfs_storage_path -l local_storage_path yaml_file
+# Notice that the mount point for the nfs and/or local volume must be specified in the yaml file.
 # E.g.
-# run_pod -o fror@dtu.dk -r www ubuntu_sciencedata.yaml
-# run_pod -o fror@dtu.dk -l /usr/local/software -p 8888 jupyter_sciencedata.yaml
+# run_pod -o fror@dtu.dk  -k "`cat ~/.ssh/id_rsa.pub`" -r www /root/sciencedata_kubernetes/pod_manifests/ubuntu_sciencedata.yaml
+# run_pod -o fror@dtu.dk -l /usr/local/software -p 8888 /root/sciencedata_kubernetes/pod_manifests/jupyter_sciencedata.yaml
 
 EXTERNAL_IP=130.226.137.130
 SCIENCEDATA_IP=10.0.0.13
@@ -25,11 +26,16 @@ ssh_public_key=""
 nfs_storage_path=""
 dryrun=
 
-while getopts "o:k:r:l:p:d" flag; do
+while getopts "o:s:k:r:l:p:d" flag; do
 	case "$flag" in
 		o)
 			# ScienceData userid who will own the pod
 			owner=$OPTARG
+			;;
+		s)
+			# Optional ScienceData home server of the userid who will own the pod
+			# Only necessary for local-only users
+			home_server=$OPTARG
 			;;
 		k)
 			# Public key to be inserted into /root/.ssh/authorized_keys
@@ -48,7 +54,7 @@ while getopts "o:k:r:l:p:d" flag; do
 		p)
 			# Port of web server running in the pod, i.e.
 			# the port that will be proxied to
-			pod_port=$OPTARG
+			pod_http_port=$OPTARG
 			;;
 		d)
 			# If set, no actions are performed, only reported
@@ -68,13 +74,24 @@ done
 yaml_file=${@:$OPTIND:1}
 #EXTRA_ARG=${@:$OPTIND+1:1}
 
+if [ -z "$yaml_file" ]; then
+	echo "ERROR: Need input file" >&2
+	exit 1
+fi
+
+if [ ! -f "$yaml_file" ]; then
+	echo "ERROR: Input file not found" >&2
+	exit 1
+fi
+
+if [ ! -s "$yaml_file" ]; then
+	echo "ERROR: Input file is empty" >&2
+	exit 1
+fi
+
 if [ -z "$owner" ]; then
 	echo "ERROR: Need owner"  >&2
 	exit -1
-fi
-
-if [ -z "$pod_port" ]; then
-	pod_port=80
 fi
 
 # Check if the user is attempting to use the host network
@@ -105,16 +122,32 @@ if [ -z "$ssh_public_key" ]; then
 		# Try getting ssh public key from yaml
 		ssh_public_key="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value'`"
 		if [ -z "$ssh_public_key" ]; then
-			echo "WARNING: No SSH public key - it will not be possible to log in" >&2kill "$pid"				return false;
-
+			echo "WARNING: No SSH public key - it will not be possible to log in" >&2
 		fi
 	fi
 fi
 
-if [ -z "$yaml_file" ]; then
-	echo "ERROR: Need input file" >&2
-	exit 1
+if [ -z "$local_storage_path" ]; then
+	# No local storage path given on stdin, try getting it from env
+	local_storage_path="$LOCAL_STORAGE_PATH"
+	if [ -z "$local_storage_path" ]; then
+		# Try getting local storage path from yaml
+		local_storage_path="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"MOUNT_SRC\") | .value'`"
+	fi
 fi
+
+if [ -z "$pod_http_port" ]; then
+	# No local storage path given on stdin, try getting it from env
+	pod_http_port="$POD_HTTP_PORT"
+	if [ -z "$pod_http_port" ]; then
+		# Try getting POD HTTP port from yaml
+		pod_http_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"POD_HTTP_PORT\") | .value'`"
+		if [ -z "$pod_http_port" ]; then
+			pod_http_port=80
+		fi
+	fi
+fi
+
 
 user=`echo $owner | awk -F@ '{print $1}'`
 domain=`echo $owner | awk -F@ '{print $2}'`
@@ -136,11 +169,13 @@ if [ -n "$new_pod_name" ] && [ "$new_pod_name" != "$pod_name" ]; then
 	pod_name="$new_pod_name"
 fi
 
-# Check if $owner has a home server configured, otherwise default to $SCIENCEDATA_IP
-home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||'`
-
+# Check if home_server is set, otherwise check if $owner has a home server configured, finally to $SCIENCEDATA_IP
+if [ -z $home_server ]; then
+	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||'`
+fi
+	
 if [ -n "$nfs_storage_path" ]; then
-	if [ ! $home_server ]; then
+	if [ -z $home_server ]; then
 		home_server=$SCIENCEDATA_IP
 	fi
 	# Check if directory exists
@@ -152,9 +187,15 @@ if [ -n "$nfs_storage_path" ]; then
 		curl --insecure -X MKCOL -u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/"
 	fi
 	if [ $home_server ]; then
+		# Check if the volume is already mounted
 		kubectl get persistentvolume | grep "nfs-${home_server}-${owner_str}" >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_volume="yes"
+		else
+			kubectl get pv -o yaml | yq '.items[] | (.spec.nfs.server+":"+.spec.nfs.path)' | grep "${home_server}:/tank/storage/${owner_str}/${nfs_storage_path}" >& /dev/null
+			if [ "$?" -ne "0" ]; then
+				create_nfs_volume="yes"
+			fi
 		fi
 		# Check if a claim has already been made on $nfs_storage_path
 		kubectl get PersistentVolumeClaim | grep  "nfs-${home_server}-${owner_str}-${nfs_storage_path}" >& /dev/null
@@ -205,9 +246,11 @@ if [ -n "$pod_name" ]; then
 	( [ -z "$nfs_storage_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"nfs-${home_server}-${owner_str}-${nfs_storage_path}\"}}]") |\
 	( [ -z "$local_storage_name" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"local\", \"persistentVolumeClaim\": {\"claimName\": \"local-claim-${local_storage_name}\"}}]")
 	### SSH service
-	echo "---"
-	cat "$SSH_SERVICE_YAML_FILE"| yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
-	yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
+	if [ -n "$ssh_public_key" ]; then
+		echo "---"
+		cat "$SSH_SERVICE_YAML_FILE"| yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
+		yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
+	fi
 	if [ -n "$nfs_storage_path" ]; then
 		### NFS volume
 		if [ -n "$create_nfs_volume" ]; then
@@ -252,20 +295,29 @@ if [ -z "$dryrun" ]; then
 		pod_ip=`kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||'`
 		if [ -n "$pod_ip" ]; then
 			# Run Caddy reverse proxy
-			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_port}" >&2
-			#caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_port} >& /dev/null &
+			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >&2
+			#caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port} >& /dev/null &
 			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
 			sed -i "s|PODIP|$pod_ip|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			sed -i "s|PODPORT|$pod_port|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			caddy start -config "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
+			sed -i "s|PODPORT|$pod_http_port|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			export PATH=/bin/:/usr/bin:/usr/local/bin
+			caddy start -config "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}" >& /dev/null &
 			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
 			break
 		fi
 		sleep 10
 	done
 	if [ -z "$pod_ip" ]; then
-		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_port}."
+		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}."
+	else
+		# Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
+		( for i in {1..300}; do
+			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
+			sleep 10
+			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
+			[[ -e ${TMPDIR}/uri-${pod_name} ]] && [[ ! -s ${TMPDIR}/uri-${pod_name} ]] && rm ${TMPDIR}/uri-${pod_name}
+			[[ -s ${TMPDIR}/uri-${pod_name} ]] && break
+		done ) >& /dev/null &
 	fi
 fi
 
