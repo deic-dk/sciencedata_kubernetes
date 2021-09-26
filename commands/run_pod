@@ -6,8 +6,10 @@
 # run_pod -o fror@dtu.dk  -k "`cat ~/.ssh/id_rsa.pub`" -r www /root/sciencedata_kubernetes/pod_manifests/ubuntu_sciencedata.yaml
 # run_pod -o fror@dtu.dk -l /usr/local/software -p 8888 /root/sciencedata_kubernetes/pod_manifests/jupyter_sciencedata.yaml
 
-EXTERNAL_IP=130.226.137.130
-SCIENCEDATA_IP=10.0.0.13
+# If you have more than one public IP, you may need to hardcode EXTERNAL_IP
+EXTERNAL_IP=`hostname -I | sed "s| |\n|g" |  grep -E -v '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1`
+# This presumes you've made an entry for sciencedata in /etc/hosts -if not, just hardcode SCIENCEDATA_IP
+SCIENCEDATA_IP=`grep -E '\ssciencedata$' /etc/hosts | sed -E 's|^([0-9\.]+)\s.*|\1|'`
 
 cmd="`echo $(readlink -f \"$0\")`"
 DIR="`dirname $cmd`"
