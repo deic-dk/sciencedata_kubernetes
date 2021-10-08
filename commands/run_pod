@@ -10,6 +10,10 @@
 EXTERNAL_IP=`hostname -I | sed "s| |\n|g" |  grep -E -v '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1`
 # This presumes you've made an entry for sciencedata in /etc/hosts -if not, just hardcode SCIENCEDATA_IP
 SCIENCEDATA_IP=`grep -E '\ssciencedata$' /etc/hosts | sed -E 's|^([0-9\.]+)\s.*|\1|'`
+# This is the trusted, not for users, internal network
+SCIENCEDATA_INTERNAL_NET=10.0.
+# This is private user network (of the vlan interface)
+SCIENCEDATA_PRIVATE_NET=10.2.
 
 cmd="`echo $(readlink -f \"$0\")`"
 DIR="`dirname $cmd`"
@@ -231,7 +235,7 @@ done
 
 # This is picked up by start.sh inside the container (for ScienceData-enabled containers)
 if [ $home_server ]; then
-	export my_home_server=`echo $home_server | sed 's|^10\.0\.|10.2.|'`
+	export my_home_server=`echo $home_server | sed "s|^$SCIENCEDATA_INTERNAL_NET|$SCIENCEDATA_PRIVATE_NET|"`
 fi
 
 if [ -n "$pod_name" ]; then
