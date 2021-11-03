@@ -239,9 +239,11 @@ if [ $home_server ]; then
 fi
 
 if [ -n "$pod_name" ]; then
-	### Modify pod YAML - ssh public key, metadata, volume
+	### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
 	( cat $yaml_file | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
+	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SD_UID\") | .value) |= \"$owner\"" | \
+	yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$FILE\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
 	sed "s|HOME_SERVER/storage/mathpass|${my_home_server}/storage/mathpass|" | \
 	yq -r -y ".metadata.name=\"$pod_name\"" |\
@@ -295,7 +297,7 @@ else
 fi
 
 if [ -z "$dryrun" ]; then
-	# Wait for one minut for pod to start
+	# Wait for one minute for pod to start
 	for i in {1..60}; do
 		# Find local IP
 		pod_ip=`kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||'`

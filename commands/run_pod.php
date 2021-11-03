@@ -10,6 +10,7 @@ if(strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0){
 $owner = $_GET['user_id']; // ID of the user logged into ScienceData and starting the pod
 $storage_path = empty($_GET['storage_path'])?"":$_GET['storage_path']; // Path to mount relative to the URI /storage/
 $public_key = empty($_GET['public_key'])?"":$_GET['public_key']; // SSH public key of the user
+$file = empty($_GET['file'])?"":$_GET['file']; // File top open inside pod
 $yaml_url = $_GET['yaml_url']; // URL of the YAML file to apply - read using the supplied user ID if it starts with
 															// /shared/, /files/, /group/, /sharingin/, /storage/, otherwise read with admin privileges (system/app file).
 
@@ -45,10 +46,10 @@ fwrite($tmpfile, $yaml);
 $metadata = stream_get_meta_data($tmpfile);
 $tmpfile_name = $metadata['uri'];
 
-exec('export KUBECONFIG=/etc/kubernetes/admin.conf; run_pod -o "'.$owner.
-		'" -s '.$_SERVER['REMOTE_ADDR'].
-		' -k "'.$public_key.'" -r "'.$storage_path.'" "'.
-		$tmpfile_name.'" 2>&1', $output, $retval);
+exec('export KUBECONFIG=/etc/kubernetes/admin.conf'.
+		(empty($file)?'':'; export FILE='.$file).'; run_pod -o "'.$owner.
+		'" -s '.$_SERVER['REMOTE_ADDR'].' -k "'.$public_key.'" -r "'.
+		$storage_path.'" "'.$tmpfile_name.'" 2>&1', $output, $retval);
 
 fclose($tmpfile);
 
