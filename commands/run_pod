@@ -143,13 +143,14 @@ if [ -z "$local_storage_path" ]; then
 fi
 
 if [ -z "$pod_http_port" ]; then
-	# No local storage path given on stdin, try getting it from env
+	# No HTTP port given on stdin, try getting it from env
 	pod_http_port="$POD_HTTP_PORT"
 	if [ -z "$pod_http_port" ]; then
 		# Try getting POD HTTP port from yaml
 		pod_http_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"POD_HTTP_PORT\") | .value'`"
+		# If port 80 is exposed, we assume it's a web server
 		if [ -z "$pod_http_port" ]; then
-			pod_http_port=80
+			pod_http_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.ports[]? | select(.containerPort == 80 and .protocol == \"TCP\")' | .containerPort`"
 		fi
 	fi
 fi
@@ -194,7 +195,7 @@ if [ -n "$nfs_storage_path" ]; then
 	fi
 	if [ $home_server ]; then
 		# Check if the volume is already mounted
-		kubectl get persistentvolume | grep "nfs-${home_server}-${owner_str}" >& /dev/null
+		kubectl get persistentvolume | grep "^nfs-${home_server}-${owner_str}-${nfs_storage_path} " >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_volume="yes"
 		else
@@ -204,7 +205,7 @@ if [ -n "$nfs_storage_path" ]; then
 			fi
 		fi
 		# Check if a claim has already been made on $nfs_storage_path
-		kubectl get PersistentVolumeClaim | grep  "nfs-${home_server}-${owner_str}-${nfs_storage_path}" >& /dev/null
+		kubectl get PersistentVolumeClaim | grep  "^nfs-${home_server}-${owner_str}-${nfs_storage_path} " >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_claim="yes"
 		fi
@@ -250,7 +251,7 @@ if [ -n "$pod_name" ]; then
 	yq -r -y ".metadata.labels.user=\"$user\"" | \
 	yq -r -y ".metadata.labels.domain=\"$domain\"" |\
 	yq -r -y ".metadata.labels.app=\"$pod_name\"" | \
-	yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" |\
+	( [ -z "$pod_http_port" ] && cat || yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" ) |\
 	( [ -z "$nfs_storage_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"nfs-${home_server}-${owner_str}-${nfs_storage_path}\"}}]") |\
 	( [ -z "$local_storage_name" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"local\", \"persistentVolumeClaim\": {\"claimName\": \"local-claim-${local_storage_name}\"}}]")
 	### SSH service
@@ -264,7 +265,7 @@ if [ -n "$pod_name" ]; then
 		if [ -n "$create_nfs_volume" ]; then
 			echo "---"
 			cat "$NFS_VOLUME_YAML_FILE" | \
-			sed "s|NFS_VOLUME_NAME|nfs-${home_server}-${owner_str}|g" | \
+			sed "s|NFS_VOLUME_NAME|nfs-${home_server}-${owner_str}-${nfs_storage_path}|g" | \
 			sed "s|STORAGE_PATH|${owner}/${nfs_storage_path}|g" | \
 			sed "s|SERVER_IP|$home_server|g"
 		fi
@@ -296,7 +297,7 @@ else
 	exit 2
 fi
 
-if [ -z "$dryrun" ]; then
+if [ -z "$dryrun" -a -n "$pod_http_port" ]; then
 	# Wait for one minute for pod to start
 	for i in {1..60}; do
 		# Find local IP
