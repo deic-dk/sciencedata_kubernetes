@@ -47,7 +47,7 @@ $metadata = stream_get_meta_data($tmpfile);
 $tmpfile_name = $metadata['uri'];
 
 exec('export KUBECONFIG=/etc/kubernetes/admin.conf'.
-		(empty($file)?'':'; export FILE='.$file).'; run_pod -o "'.$owner.
+		(empty($file)?'':'; export FILE="'.$file).'"; run_pod -o "'.$owner.
 		'" -s '.$_SERVER['REMOTE_ADDR'].' -k "'.$public_key.'" -r "'.
 		$storage_path.'" "'.$tmpfile_name.'" 2>&1', $output, $retval);
 
