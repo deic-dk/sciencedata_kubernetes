@@ -4,8 +4,10 @@ metadata:
   name: NFS_CLAIM_NAME # will be configured by run_pod.sh
 spec:
   storageClassName: nfs
+  #storageClassName: ""
   accessModes:
     - ReadWriteMany
   resources:
     requests:
       storage: 10Gi # ignored
+  #volumeName: nfs
