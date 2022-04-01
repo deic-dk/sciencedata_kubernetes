@@ -37,10 +37,11 @@ fwrite($tmpfile, $yaml);
 $metadata = stream_get_meta_data($tmpfile);
 $tmpfile_name = $metadata['uri'];
 
-$cmd = 'export KUBECONFIG=/etc/kubernetes/admin.conf'.
+$cmd = '/bin/bash -c \'set -o pipefail;'.
+		'export KUBECONFIG=/etc/kubernetes/admin.conf'.
 		(empty($file)?'':'; export FILE="'.$file.'"').'; run_pod -o "'.$owner.
 		'" -s '.$_SERVER['REMOTE_ADDR'].' -k "'.$public_key.'" -r "'.
-		$storage_path.'" "'.$tmpfile_name.'" 2>&1 | tee -a "'.$logFile.'"';
+		$storage_path.'" "'.$tmpfile_name.'" 2>&1 | tee -a "'.$logFile.'"\'';
 
 exec($cmd, $output, $retval);
 

@@ -318,6 +318,7 @@ if [ -z "$dryrun" -a -n "$pod_http_port" ]; then
 	done
 	if [ -z "$pod_ip" ]; then
 		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}."
+    exit 1
 	else
 		# Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
 		( for i in {1..300}; do
