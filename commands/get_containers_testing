@@ -1,47 +1,52 @@
 #!/bin/bash
 
-user="$@"
+owner="$@"
 TMPDIR="/tmp"
+
+user=`echo $owner | awk -F@ '{print $1}'`
+domain=`echo $owner | awk -F@ '{print $2}'`
 
 echo "###" >&2
 echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri" >&2
 echo "###" >&2
-kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
-	podJson="`kubectl get pod "$pod" -o json`"
-	hostip=`echo "$podJson" | jq -r '.status.hostIP' | sed 's|null||'`
-	podip=`echo "$podJson" | jq -r '.status.podIP' | sed 's|null||'`
-	#owner=`echo "$podJson" | jq -r '.metadata.labels | .user+"@"+.domain'`
-	username=`echo "$podJson" | jq -r '.metadata.labels | .user' | sed -E 's|^null$||'`
-	domain=`echo "$podJson" | jq -r '.metadata.labels | .domain' | sed -E 's|^null$||'`
-	# Crashed pods will also be in phase Running
-	state=`echo "$podJson" | jq -r '.status.phase'`
-	# Unschedulable pods will have no .status.containerStatuses, but have .status.conditions[].message
-	message=`echo "$podJson" | jq -r '.status.conditions[]?.message?' | grep -E -v '^null$'`
-	status=`echo "$podJson" | jq -r '.status.containerStatuses[]?.state[]?  | join(", ")'`
-	if [[ -n "$message" ]] && [[ -z "$status" ]]; then
-		echo "WARNING: $pod has problems: $message" >&2
-	fi
-	echo "$status" | grep "," >& /dev/null
-	if [ $? -ne 0 ] && [ "$state" == "Running" ]; then
-		startTime=`echo "$podJson" | jq -r '.status.startTime'`
-		startSeconds=`date -d "$startTime" +"%s"`
-		nowSeconds=`date  +"%s"`
-		diffSeconds=$((nowSeconds-startSeconds))
-	fi
-	if [ -n "$domain" ]; then
-		owner="$username@$domain"
-	else
-		owner="$username"
-	fi
-	if [ -n "$user" -a "$user" != "$owner" ]; then
-		continue
-	fi
-	nodePort=`kubectl get service "${pod}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
-	reverseProxyPort=`echo "$podJson" | jq -r '.metadata.labels.reverseProxyPort' | sed -E 's|^null$||'`
-	uri=`cat ${TMPDIR}/uri-${pod} 2>/dev/null`
-
-	kubectl get pod "$pod" -o json | jq -r --arg POD "$pod" --arg HOSTIP "$hostip" --arg PODIP "$podip" \
-	--arg OWNER "$owner" --arg AGE "$diffSeconds" --arg STATUS "${state}:${status}" --arg NODEPORT "$nodePort"  \
-	--arg REVERSEPROXYPORT "$reverseProxyPort" --arg URI "$uri" \
-	'.spec.containers[] | $POD+"|"+.name+"|"+.image+"|"+$PODIP+"|"+$HOSTIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS+"|"+$NODEPORT+"|"+ [.env[]?|select(.name=="USERNAME")][0]?.value +"|"+$REVERSEPROXYPORT+"|"+$URI'
-done | sed 's|@$||'
+if [[ -n $owner ]]; then
+    alljson=`kubectl get pods -l "user=$user,domain=$domain" -o json`
+else
+    alljson=`kubectl get pods -o json`
+fi
+nfound=`echo $alljson | jq '.items | length'`
+for ((ii=0 ; ii < $nfound ; ii++)); do
+    json=`echo "$alljson" | jq --argjson NUM $ii '.items[$NUM]'`
+    jsondomain=`echo "$json" | jq -r '.metadata.labels.domain' | sed -E 's|^null$||'`
+    jsonuser=`echo "$json" | jq -r '.metadata.labels.user' | sed -E 's|^null$||'`
+    if [ -n "$jsondomain" ]; then
+        jsonowner="$jsonuser@$jsondomain"
+    else
+        jsonowner="$jsonuser"
+    fi
+    # double check that the owner is correct
+    if [ -n "$owner" -a "$owner" != "$jsonowner" ]; then
+        continue
+    fi
+    # Crashed pods will also be in phase Running
+    state=`echo "$json" | jq -r '.status.phase'`
+    # Unschedulable pods will have no .status.containerStatuses, but have .status.conditions[].message
+    message=`echo "$json" | jq -r '.status.conditions[]?.message?' | grep -E -v '^null$'`
+    status=`echo "$json" | jq -r '.status.containerStatuses[]?.state[]? | join(", ")'`
+    if [ $? -ne 0 ] && [ "$state" == "Running" ]; then
+        startTime=`echo "$json" | jq -r '.status.startTime'`
+        startSeconds=`date -d "$startTime" +"%s"`
+        nowSeconds=`date  +"%s"`
+        diffSeconds=$((nowSeconds-startSeconds))
+    fi
+    envUsername=`echo "$json" | jq -r '.spec.containers[].env[]?|select(.name=="USERNAME").value'`
+    podName=`echo "$json" | jq -r '.metadata.name'`
+    nodePort=`kubectl get service "${podName}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
+    reverseProxyPort=`echo "$json" | jq -r '.metadata.labels.reverseProxyPort' | sed -E 's|^null$||'`
+    uri=`cat ${TMPDIR}/uri-${podName} 2>/dev/null`
+    echo "$json" | jq -r --arg NAME "$podName" --arg OWNER "$jsonowner" --arg AGE "$diffSeconds" \
+                      --arg STATUS "${state}:${status}" --arg NODEPORT "$nodePort" \
+                      --arg REVERSEPROXYPORT "$reverseProxyPort" --arg URI "$uri" \
+                      --arg ENVUSERNAME "$envUsername"  \
+                      '$NAME+"|"+.spec.containers[].image+"|"+.status.podIP+"|"+.status.hostIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS+"|"+$NODEPORT+"|"+$ENVUSERNAME+"|"+$REVERSEPROXYPORT+"|"+$URI'
+done
