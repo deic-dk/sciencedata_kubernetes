@@ -17,6 +17,6 @@ if(empty($owner) || empty($pod)){
 	echo "<h1>Missing parameter(s)!</h1>";
 	exit;
 }else {
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_pod_logs -u "$owner" "$pod"`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_pod_logs_testing -u "$owner" "$pod"`;
 }
 ?>

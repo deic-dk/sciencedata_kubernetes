@@ -14,13 +14,13 @@ if(empty($fields) || $fields!="include" || $fields!="yes" || $fields!="true"){
 	/*header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
 	echo "<h1>Missing parameter(s)!</h1>";
 	exit;*/
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner" 2>&1 | grep '|' | grep -v '^#'`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers_testing "$owner" 2>&1 | grep '|' | grep -v '^#'`;
 }
 elseif($fields=="include"){
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner"`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers_testing "$owner"`;
 }
 else{// only fields - fields=yes or fields=true
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner" 2>&1 | head -2 | tail -1 | sed -E 's|^#||'`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers_testing "$owner" 2>&1 | head -2 | tail -1 | sed -E 's|^#||'`;
 }
 
 ?>

@@ -39,7 +39,7 @@ $tmpfile_name = $metadata['uri'];
 
 $cmd = '/bin/bash -c \'set -o pipefail;'.
 		'export KUBECONFIG=/etc/kubernetes/admin.conf'.
-		(empty($file)?'':'; export FILE="'.$file.'"').'; run_pod -o "'.$owner.
+		(empty($file)?'':'; export FILE="'.$file.'"').'; run_pod_testing -o "'.$owner.
 		'" -s '.$_SERVER['REMOTE_ADDR'].' -k "'.$public_key.'" -r "'.
 		$storage_path.'" "'.$tmpfile_name.'" 2>&1 | tee -a "'.$logFile.'"\'';
 

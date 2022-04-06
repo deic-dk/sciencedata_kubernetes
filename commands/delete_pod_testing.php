@@ -19,7 +19,7 @@ if(empty($owner) || empty($pod)){
 	exit;
 }
 
-exec('export KUBECONFIG=/etc/kubernetes/admin.conf; delete_pod -u "'.$owner.'" "'.$pod.'"', $output, $retval);
+exec('export KUBECONFIG=/etc/kubernetes/admin.conf; delete_pod_testing -u "'.$owner.'" "'.$pod.'"', $output, $retval);
 
 if($retval===0){
 	echo "<h1>OK</h1>";

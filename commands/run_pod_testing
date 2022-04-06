@@ -32,6 +32,8 @@ ssh_public_key=""
 nfs_storage_path=""
 dryrun=
 
+echo "run_pod_testing called" >> /var/log/testingapi/run_pod_testing
+
 while getopts "o:s:k:r:l:p:d" flag; do
 	case "$flag" in
 		o)
