@@ -9,44 +9,31 @@ domain=`echo $owner | awk -F@ '{print $2}'`
 echo "###" >&2
 echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri" >&2
 echo "###" >&2
-if [[ -n $owner ]]; then
-    alljson=`kubectl get pods -l "user=$user,domain=$domain" -o json`
-else
-    alljson=`kubectl get pods -o json`
-fi
-nfound=`echo $alljson | jq '.items | length'`
-for ((ii=0 ; ii < $nfound ; ii++)); do
-    json=`echo "$alljson" | jq --argjson NUM $ii '.items[$NUM]'`
-    jsondomain=`echo "$json" | jq -r '.metadata.labels.domain' | sed -E 's|^null$||'`
-    jsonuser=`echo "$json" | jq -r '.metadata.labels.user' | sed -E 's|^null$||'`
-    if [ -n "$jsondomain" ]; then
-        jsonowner="$jsonuser@$jsondomain"
-    else
-        jsonowner="$jsonuser"
-    fi
-    # double check that the owner is correct
-    if [ -n "$owner" -a "$owner" != "$jsonowner" ]; then
-        continue
-    fi
-    # Crashed pods will also be in phase Running
-    state=`echo "$json" | jq -r '.status.phase'`
-    # Unschedulable pods will have no .status.containerStatuses, but have .status.conditions[].message
-    message=`echo "$json" | jq -r '.status.conditions[]?.message?' | grep -E -v '^null$'`
-    status=`echo "$json" | jq -r '.status.containerStatuses[]?.state[]? | join(", ")'`
-    if [ $? -ne 0 ] && [ "$state" == "Running" ]; then
-        startTime=`echo "$json" | jq -r '.status.startTime'`
-        startSeconds=`date -d "$startTime" +"%s"`
-        nowSeconds=`date  +"%s"`
+#if [[ -n $owner ]]; then
+#    alljson=`kubectl get pods -l "user=$user,domain=$domain" -o json`
+#else
+#    alljson=`kubectl get pods -o json`
+#fi
+nowSeconds=`date +"%s"`
+kubectl get pods -l "user=$user,domain=$domain" -o json | jq -r '.items[] | {name: .metadata.name, cname: .spec.containers[].name, image: .spec.containers[].image, podIP: .status.podIP, hostIP: .status.hostIP, user: .metadata.labels.user, domain: .metadata.labels.domain, starttime: .status.startTime, state: .status.phase, message: .status.conditions|map(select(has("message")).message)[0]?, status: .status.containerStatuses[]?.state[]? | join(", "), sshuser: .spec.containers[]|[.env[]?]|map(select(.name=="USERNAME").value)[0]?, rpport: .metadata.labels.reverseProxyPort}' | jq -r '.name+"|"+.cname+"|"+.image+"|"+.podIP+"|"+.hostIP+"|"+.user+"|"+.domain+"|"+.starttime+"|"+.status+"|"+.state+"|"+.message+"|"+.sshuser+"|"+.rpport' | while read line; do
+    startTime=`echo "$line" | awk '{split($0,a,"|"); print a[8];}' | date +"%s"`
+    if [ -n "$startTime" -a "$startTime" != null ]; then
+        startSeconds=`echo "$starttime" | date +"%s"`
         diffSeconds=$((nowSeconds-startSeconds))
+    else
+        diffSeconds=0
     fi
-    envUsername=`echo "$json" | jq -r '.spec.containers[].env[]?|select(.name=="USERNAME").value'`
-    podName=`echo "$json" | jq -r '.metadata.name'`
-    nodePort=`kubectl get service "${podName}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
-    reverseProxyPort=`echo "$json" | jq -r '.metadata.labels.reverseProxyPort' | sed -E 's|^null$||'`
-    uri=`cat ${TMPDIR}/uri-${podName} 2>/dev/null`
-    echo "$json" | jq -r --arg NAME "$podName" --arg OWNER "$jsonowner" --arg AGE "$diffSeconds" \
-                      --arg STATUS "${state}:${status}" --arg NODEPORT "$nodePort" \
-                      --arg REVERSEPROXYPORT "$reverseProxyPort" --arg URI "$uri" \
-                      --arg ENVUSERNAME "$envUsername"  \
-                      '$NAME+"|"+.spec.containers[].image+"|"+.status.podIP+"|"+.status.hostIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS+"|"+$NODEPORT+"|"+$ENVUSERNAME+"|"+$REVERSEPROXYPORT+"|"+$URI'
+    domain=`echo "$line" | awk '{split($0,a,"|"); print a[7];}'`
+    user=`echo "$line" | awk '{split($0,a,"|"); print a[6];}'`
+	  if [ -n "$domain" ]; then
+		    owner="$user@$domain"
+	  else
+		    owner="$user"
+	  fi
+    podName=`echo "$line" | awk '{split($0,a,"|"); print a[1];}'`
+	  nodePort=`kubectl get service "${podName}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
+	  uri=`cat ${TMPDIR}/uri-${podName} 2>/dev/null`
+    echo "$line" | awk -v OWNER="$owner" -v NODEPORT="$nodePort" -v DIFFSECONDS="$diffseconds" -v URI="$URI" \
+                       '{split($0,a,"|"); printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",a[1],a[2],a[3],a[4],a[5],OWNER,DIFFSECONDS,a[9],NODEPORT,a[12],a[13],URI; print ""}'
 done
+
