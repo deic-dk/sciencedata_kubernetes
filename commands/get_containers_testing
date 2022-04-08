@@ -9,22 +9,33 @@ domain=`echo $owner | awk -F@ '{print $2}'`
 echo "###" >&2
 echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri" >&2
 echo "###" >&2
-#if [[ -n $owner ]]; then
-#    alljson=`kubectl get pods -l "user=$user,domain=$domain" -o json`
-#else
-#    alljson=`kubectl get pods -o json`
-#fi
+if [[ -n $owner ]]; then
+    opt="-l user=$user,domain=$domain "
+else
+    opt=""
+fi
 nowSeconds=`date +"%s"`
-kubectl get pods -l "user=$user,domain=$domain" -o json | jq -r '.items[] | {name: .metadata.name, cname: .spec.containers[].name, image: .spec.containers[].image, podIP: .status.podIP, hostIP: .status.hostIP, user: .metadata.labels.user, domain: .metadata.labels.domain, starttime: .status.startTime, state: .status.phase, message: .status.conditions|map(select(has("message")).message)[0]?, status: .status.containerStatuses[]?.state[]? | join(", "), sshuser: .spec.containers[]|[.env[]?]|map(select(.name=="USERNAME").value)[0]?, rpport: .metadata.labels.reverseProxyPort}' | jq -r '.name+"|"+.cname+"|"+.image+"|"+.podIP+"|"+.hostIP+"|"+.user+"|"+.domain+"|"+.starttime+"|"+.status+"|"+.state+"|"+.message+"|"+.sshuser+"|"+.rpport' | while read line; do
-    startTime=`echo "$line" | awk '{split($0,a,"|"); print a[8];}' | date +"%s"`
-    if [ -n "$startTime" -a "$startTime" != null ]; then
-        startSeconds=`echo "$starttime" | date +"%s"`
+echo $(kubectl get pods "$opt"-o json) | jq -r '.items[] | {name: .metadata.name, cname: .spec.containers[].name, image: .spec.containers[].image, podIP: .status.podIP, hostIP: .status.hostIP, user: .metadata.labels.user, domain: .metadata.labels.domain, starttime: .status.startTime, state: .status.phase, message: .status.conditions|map(select(has("message")).message)[0]?, status: .status.containerStatuses[]?.state[]? | join(", "), sshuser: .spec.containers[]|[.env[]?]|map(select(.name=="USERNAME").value)[0]?, rpport: .metadata.labels.reverseProxyPort}' | jq -r '.name+"|"+.cname+"|"+.image+"|"+.podIP+"|"+.hostIP+"|"+.user+"|"+.domain+"|"+.starttime+"|"+.status+"|"+.state+"|"+.message+"|"+.sshuser+"|"+.rpport+"|"' | while read line; do
+    readarray -d '|' -t array < <(echo "$line")
+    # 0: name, 1: cname, 2: image, 3: podIP, 4: hostIP, 5: user, 6: domain, 7: starttime, 8: status, 9: state, 10: message, 11: sshuser, 12: rpport
+    user="${array[5]}"
+    domain="${array[6]}"
+    startTime="${array[7]}"
+    status="${array[8]}"
+    state="${array[9]}"
+    message="${array[10]}"
+
+    if [ -n "$startTime" -a "$startTime" != null -a "$state" == "Running" ]; then
+        startSeconds=`date -d "$startTime" +"%s"`
         diffSeconds=$((nowSeconds-startSeconds))
     else
         diffSeconds=0
     fi
-    domain=`echo "$line" | awk '{split($0,a,"|"); print a[7];}'`
-    user=`echo "$line" | awk '{split($0,a,"|"); print a[6];}'`
+
+    if [[ -n "$message" ]] && [[ -z "$status" ]]; then
+		    echo "WARNING: $pod has problems: $message" >&2
+	  fi
+
 	  if [ -n "$domain" ]; then
 		    owner="$user@$domain"
 	  else
@@ -33,7 +44,6 @@ kubectl get pods -l "user=$user,domain=$domain" -o json | jq -r '.items[] | {nam
     podName=`echo "$line" | awk '{split($0,a,"|"); print a[1];}'`
 	  nodePort=`kubectl get service "${podName}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
 	  uri=`cat ${TMPDIR}/uri-${podName} 2>/dev/null`
-    echo "$line" | awk -v OWNER="$owner" -v NODEPORT="$nodePort" -v DIFFSECONDS="$diffseconds" -v URI="$URI" \
-                       '{split($0,a,"|"); printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",a[1],a[2],a[3],a[4],a[5],OWNER,DIFFSECONDS,a[9],NODEPORT,a[12],a[13],URI; print ""}'
+    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" "${array[3]}" "${array[4]}" "$owner" "$diffSeconds" "$state:$status" "$nodePort" "${array[11]}" "${array[12]}" "$uri"
 done
 
