@@ -1,21 +1,23 @@
 #!/bin/bash
 
-owner="$@"
 TMPDIR="/tmp"
-
-user=`echo $owner | awk -F@ '{print $1}'`
-domain=`echo $owner | awk -F@ '{print $2}'`
+nowSeconds=`date +"%s"`
 
 echo "###" >&2
 echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri" >&2
 echo "###" >&2
+
+owner="$@"
+user=`echo $owner | awk -F@ '{print $1}'`
+domain=`echo $owner | awk -F@ '{print $2}'`
+
 if [[ -n $owner ]]; then
-    opt="-l user=$user,domain=$domain "
+    labels="user=$user,domain=$domain"
 else
-    opt=""
+    labels="foo!=bar"
 fi
-nowSeconds=`date +"%s"`
-echo $(kubectl get pods "$opt"-o json) | jq -r '.items[] | {name: .metadata.name, cname: .spec.containers[].name, image: .spec.containers[].image, podIP: .status.podIP, hostIP: .status.hostIP, user: .metadata.labels.user, domain: .metadata.labels.domain, starttime: .status.startTime, state: .status.phase, message: .status.conditions|map(select(has("message")).message)[0]?, status: .status.containerStatuses[]?.state[]? | join(", "), sshuser: .spec.containers[]|[.env[]?]|map(select(.name=="USERNAME").value)[0]?, rpport: .metadata.labels.reverseProxyPort}' | jq -r '.name+"|"+.cname+"|"+.image+"|"+.podIP+"|"+.hostIP+"|"+.user+"|"+.domain+"|"+.starttime+"|"+.status+"|"+.state+"|"+.message+"|"+.sshuser+"|"+.rpport+"|"' | while read line; do
+
+echo $(kubectl get pods -l "$labels" -o json) | jq -r '.items[] | {name: .metadata.name, cname: .spec.containers[].name, image: .spec.containers[].image, podIP: .status.podIP, hostIP: .status.hostIP, user: .metadata.labels.user, domain: .metadata.labels.domain, starttime: .status.startTime, state: .status.phase, message: .status.conditions|map(select(has("message")).message)[0]?, status: .status.containerStatuses[]?.state[]? | join(", "), sshuser: .spec.containers[]|[.env[]?]|map(select(.name=="USERNAME").value)[0]?, rpport: .metadata.labels.reverseProxyPort}' | jq -r '.name+"|"+.cname+"|"+.image+"|"+.podIP+"|"+.hostIP+"|"+.user+"|"+.domain+"|"+.starttime+"|"+.status+"|"+.state+"|"+.message+"|"+.sshuser+"|"+.rpport+"|"' | while read line; do
     readarray -d '|' -t array < <(echo "$line")
     # 0: name, 1: cname, 2: image, 3: podIP, 4: hostIP, 5: user, 6: domain, 7: starttime, 8: status, 9: state, 10: message, 11: sshuser, 12: rpport
     user="${array[5]}"
