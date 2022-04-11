@@ -47,6 +47,12 @@ exec($cmd, $output, $retval);
 
 fclose($tmpfile);
 
+$ystart = array_search("Begin input yaml", $output) + 2;
+$yend = array_search("End input yaml", $output);
+$parsed = yaml_parse(implode("\n", array_slice($output, $ystart, $ystart - $yend)));
+$start_proxy_params = explode("|", $output[array_search("Successful YAML. Start proxy params:")+2]);
+file_put_contents('/root/joshua/pp.txt', implode(" - ", $start_proxy_params));
+
 if($retval===0){
 	echo "<h1>OK</h1>";
 	echo "<pre>".implode("\n", $output)."</pre>";
@@ -56,5 +62,12 @@ else{
 	echo "<h1>Something went wrong with $cmd! Check existence of $yaml_url</h1>";
 	echo "<pre>".implode("\n", $output)."</pre>";
 }
+
+$pod_name = $parsed["metadata"]["name"];
+$pod_http_port = $parsed["spec"]["containers"]["ports"]["containerPort"];
+$reverse_proxy_port = $parsed["metadata"]["labels"]["reverseProxyPort"];
+
+$cmd = 'run_pod_proxy_start '.$start_proxy_params[0].' '.$start_proxy_params[1].' '.$start_proxy_params[2].' >> '.$logFile.' 2>&1 &';
+exec($cmd);
 
 ?>

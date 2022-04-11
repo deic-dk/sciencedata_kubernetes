@@ -242,6 +242,8 @@ if [ $home_server ]; then
 fi
 
 if [ -n "$pod_name" ]; then
+    echo "Successful YAML. Start proxy params:"
+    echo "$pod_name|$pod_http_port|$reverse_proxy_port"
 	### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
 	( cat $yaml_file | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
@@ -297,39 +299,5 @@ if [ -n "$pod_name" ]; then
 else
 	echo "ERROR: Parsing .metadata.name from YAML failed" >&2
 	exit 2
-fi
-
-if [ -z "$dryrun" -a -n "$pod_http_port" ]; then
-	# Wait for one minute for pod to start
-	for i in {1..60}; do
-		# Find local IP
-		pod_ip=`kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||'`
-		if [ -n "$pod_ip" ]; then
-			# Run Caddy reverse proxy
-			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >&2
-			#caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port} >& /dev/null &
-			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			sed -i "s|PODIP|$pod_ip|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			sed -i "s|PODPORT|$pod_http_port|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			export PATH=/bin/:/usr/bin:/usr/local/bin
-			caddy start -config "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}" >& /dev/null &
-			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
-			break
-		fi
-		sleep 10
-	done
-	if [ -z "$pod_ip" ]; then
-		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}."
-    exit 1
-	else
-		# Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
-		( for i in {1..300}; do
-			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
-			sleep 10
-			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
-			[[ -e ${TMPDIR}/uri-${pod_name} ]] && [[ ! -s ${TMPDIR}/uri-${pod_name} ]] && rm ${TMPDIR}/uri-${pod_name}
-			[[ -s ${TMPDIR}/uri-${pod_name} ]] && break
-		done ) >& /dev/null &
-	fi
 fi
 
