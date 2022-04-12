@@ -5,6 +5,10 @@ pod_http_port=$2
 reverse_proxy_port=$3
 TMPDIR="/tmp"
 
+cmd="`echo $(readlink -f \"$0\")`"
+DIR="`dirname $cmd`"
+CADDY_FILE="$DIR/../service_manifests/Caddyfile"
+
 echo "running successfully"
 if [ -n "$pod_http_port" ]; then
 	# Wait for one minute for pod to start

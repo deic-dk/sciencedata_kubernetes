@@ -67,7 +67,12 @@ $pod_name = $parsed["metadata"]["name"];
 $pod_http_port = $parsed["spec"]["containers"]["ports"]["containerPort"];
 $reverse_proxy_port = $parsed["metadata"]["labels"]["reverseProxyPort"];
 
-$cmd = 'run_pod_proxy_start '.$start_proxy_params[0].' '.$start_proxy_params[1].' '.$start_proxy_params[2].' >> '.$logFile.' 2>&1 &';
+
+// Wait for the pod to start and then run the reverse proxy
+$cmd = 'export KUBECONFIG=/etc/kubernetes/admin.conf; '.
+     'run_pod_proxy_start '.$start_proxy_params[0].' '.$start_proxy_params[1].' '.
+     $start_proxy_params[2].' >> '.$logFile.' 2>&1 &';
+
 exec($cmd);
 
 ?>
