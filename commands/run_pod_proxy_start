@@ -9,7 +9,6 @@ cmd="`echo $(readlink -f \"$0\")`"
 DIR="`dirname $cmd`"
 CADDY_FILE="$DIR/../service_manifests/Caddyfile"
 
-echo "running successfully"
 if [ -n "$pod_http_port" ]; then
 	# Wait for one minute for pod to start
 	for i in {1..60}; do

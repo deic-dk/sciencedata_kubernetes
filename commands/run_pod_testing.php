@@ -47,26 +47,18 @@ exec($cmd, $output, $retval);
 
 fclose($tmpfile);
 
-$ystart = array_search("Begin input yaml", $output) + 2;
-$yend = array_search("End input yaml", $output);
-$parsed = yaml_parse(implode("\n", array_slice($output, $ystart, $ystart - $yend)));
 $start_proxy_params = explode("|", $output[array_search("Successful YAML. Start proxy params:")+2]);
-file_put_contents('/root/joshua/pp.txt', implode(" - ", $start_proxy_params));
 
+// If okay, then send an http 200 OK with the name of the starting pod
 if($retval===0){
 	echo "<h1>OK</h1>";
-	echo "<pre>".implode("\n", $output)."</pre>";
+	echo "<pre>".$start_proxy_params[0]."</pre>";
 }
 else{
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);
 	echo "<h1>Something went wrong with $cmd! Check existence of $yaml_url</h1>";
 	echo "<pre>".implode("\n", $output)."</pre>";
 }
-
-$pod_name = $parsed["metadata"]["name"];
-$pod_http_port = $parsed["spec"]["containers"]["ports"]["containerPort"];
-$reverse_proxy_port = $parsed["metadata"]["labels"]["reverseProxyPort"];
-
 
 // Wait for the pod to start and then run the reverse proxy
 $cmd = 'export KUBECONFIG=/etc/kubernetes/admin.conf; '.
