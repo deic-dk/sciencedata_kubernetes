@@ -7,7 +7,6 @@ run=""
 
 TMPDIR="/tmp"
 
-
 while getopts "u:d" flag; do
 	case "$flag" in
 		u)
@@ -32,17 +31,23 @@ ssh_service_name="$pod_name-ssh"
 
 DIR="$(dirname "$(readlink -f "$0")")"
 
+get_pod_data() {
+    $DIR/get_containers_testing ${user:+"$user"} 2>&1 | grep "^$pod_name|"
+}
+readarray -d '|' -t podInfo < <(get_pod_data)
+
 # If user is given, check that user owns pod
 if [ -n "$user" ]; then
-	owner=`$DIR/get_containers 2>&1 | grep "^$pod_name|" | awk -F'|' '{print $6}'`
+	owner="${podInfo[5]}"
 	if [[ "$owner" != "" && "$owner" != "$user" ]]; then
 		echo "ERROR: pod $pod_name owned by $owner, NOT $user" >&2
+    echo "owner error\n owner: $owner\nuser: $user" >> "$logfile"
 		exit 1
 	fi
 fi
 
 # First find the IP of the pod
-ip=`$DIR/get_containers 2>&1 | grep -E "^$pod_name\|" | awk -F'|' '{print $4}' | tr -d '\n'`
+ip="${podInfo[3]}"
 
 # Kill reverse proxy
 if [ -n "$ip" ]; then
@@ -107,5 +112,4 @@ while read claim_name; do
 	fi
 
 done
-
 
