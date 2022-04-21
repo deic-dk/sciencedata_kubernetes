@@ -13,11 +13,25 @@ domain=`echo $owner | awk -F@ '{print $2}'`
 
 if [[ -n $owner ]]; then
     labels="user=$user,domain=$domain"
-else
-    labels="foo!=bar"
 fi
 
-echo $(kubectl get pods -l "$labels" -o json) | jq -r '.items[] | {name: .metadata.name, cname: .spec.containers[].name, image: .spec.containers[].image, podIP: .status.podIP, hostIP: .status.hostIP, user: .metadata.labels.user, domain: .metadata.labels.domain, starttime: .status.startTime, state: .status.phase, message: .status.conditions|map(select(has("message")).message)[0]?, status: .status.containerStatuses[]?.state[]? | join(", "), sshuser: .spec.containers[]|[.env[]?]|map(select(.name=="USERNAME").value)[0]?, rpport: .metadata.labels.reverseProxyPort}' | jq -r '.name+"|"+.cname+"|"+.image+"|"+.podIP+"|"+.hostIP+"|"+.user+"|"+.domain+"|"+.starttime+"|"+.status+"|"+.state+"|"+.message+"|"+.sshuser+"|"+.rpport+"|"' | while read line; do
+echo $(kubectl get pods ${labels:+-l "$labels"} -o json) |\
+    jq -r '.items[] | {name: .metadata.name, '\
+'cname: [.spec.containers[].name][0]?, '\
+'image: [.spec.containers[].image][0]?, '\
+'podIP: .status.podIP?, '\
+'hostIP: .status.hostIP?, '\
+'user: .metadata.labels.user?, '\
+'domain: .metadata.labels.domain?, '\
+'starttime: .status.startTime?, '\
+'state: .status.phase?, '\
+'message: .status|(.conditions? // [])|map(select(has("message")).message)[0]?, '\
+'status: (.status.containerStatuses[]?.state[]? // []) | join(", "), '\
+'sshuser: .spec.containers[]|[.env[]?]|map(select(.name=="USERNAME").value)[0]?, '\
+'rpport: .metadata.labels.reverseProxyPort?}' |\
+    jq -r '.name+"|"+.cname+"|"+.image+"|"+.podIP+"|"+.hostIP+"|"+.user+"|"+'\
+'.domain+"|"+.starttime+"|"+.status+"|"+.state+"|"+.message+"|"+.sshuser+"|"+.rpport+"|"' |\
+    while read line; do
     readarray -d '|' -t array < <(echo "$line")
     # 0: name, 1: cname, 2: image, 3: podIP, 4: hostIP, 5: user, 6: domain, 7: starttime, 8: status, 9: state, 10: message, 11: sshuser, 12: rpport
     user="${array[5]}"
@@ -46,6 +60,7 @@ echo $(kubectl get pods -l "$labels" -o json) | jq -r '.items[] | {name: .metada
     podName=`echo "$line" | awk '{split($0,a,"|"); print a[1];}'`
 	  nodePort=`kubectl get service "${podName}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
 	  uri=`cat ${TMPDIR}/uri-${podName} 2>/dev/null`
-    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" "${array[3]}" "${array[4]}" "$owner" "$diffSeconds" "$state:$status" "$nodePort" "${array[11]}" "${array[12]}" "$uri"
+    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" "${array[3]}"\
+           "${array[4]}" "$owner" "$diffSeconds" "$state:$status" "$nodePort" "${array[11]}" "${array[12]}" "$uri"
 done
 
