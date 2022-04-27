@@ -6,6 +6,7 @@
 # run_pod -o fror@dtu.dk  -k "`cat ~/.ssh/id_rsa.pub`" -r www /root/sciencedata_kubernetes/pod_manifests/ubuntu_sciencedata.yaml
 # run_pod -o fror@dtu.dk -l /usr/local/software -p 8888 /root/sciencedata_kubernetes/pod_manifests/jupyter_sciencedata.yaml
 
+logfile='/var/log/kube.log'
 # If you have more than one public IP, you may need to hardcode EXTERNAL_IP
 EXTERNAL_IP=`hostname -I | sed "s| |\n|g" |  grep -E -v '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1`
 # This presumes you've made an entry for sciencedata in /etc/hosts -if not, just hardcode SCIENCEDATA_IP
@@ -31,8 +32,6 @@ owner=""
 ssh_public_key=""
 nfs_storage_path=""
 dryrun=
-
-echo "run_pod_testing called" >> /var/log/testingapi/run_pod_testing
 
 while getopts "o:s:k:r:l:p:d" flag; do
 	case "$flag" in
@@ -130,7 +129,7 @@ if [ -z "$ssh_public_key" ]; then
 		# Try getting ssh public key from yaml
 		ssh_public_key="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value'`"
 		if [ -z "$ssh_public_key" ]; then
-			echo "WARNING: No SSH public key - it will not be possible to log in" >&2
+			echo "WARNING: No SSH public key - it will not be possible to log in" >> "$logfile"
 		fi
 	fi
 fi
@@ -152,7 +151,7 @@ if [ -z "$pod_http_port" ]; then
 		pod_http_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"POD_HTTP_PORT\") | .value'`"
 		# If port 80 is exposed, we assume it's a web server
 		if [ -z "$pod_http_port" ]; then
-			pod_http_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.ports[]? | select(.containerPort == 80 and .protocol == \"TCP\")' | .containerPort`"
+			pod_http_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.ports[]? | select(.containerPort == 80 and .protocol == \"TCP\") | .containerPort'`"
 		fi
 	fi
 fi
@@ -192,7 +191,7 @@ if [ -n "$nfs_storage_path" ]; then
 	-u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/"`
 	# Create if not
 	if [ "$dir_exists_http_code" != "207" ] && [ -z "$dryrun" ]; then
-		echo INFO: "https://${home_server}/storage/${nfs_storage_path}/ does NOT exist" >&2
+		echo "INFO: https://${home_server}/storage/${nfs_storage_path}/ does NOT exist" >> "$logfile"
 		curl --insecure -X MKCOL -u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/"
 	fi
 	if [ $home_server ]; then
@@ -230,11 +229,15 @@ if [ -n "$local_storage_path" ]; then
 	fi
 fi
 
-# Find free port for Caddy proxy in range 2000-3000
-for reverse_proxy_port in {2000..3000}; do
-	ps aux | grep "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-" >& /dev/null || break
-	ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" >&/dev/null || break
-done
+# Find free port for Caddy proxy in range 2000-3000 iff there is a port to forward to
+if [[ -n $pod_http_port ]]; then
+  for reverse_proxy_port in {2000..3000}; do
+  	ps aux | grep "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-" >& /dev/null || break
+  	ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" >&/dev/null || break
+  done
+else
+  reverse_proxy_port=''
+fi
 
 # This is picked up by start.sh inside the container (for ScienceData-enabled containers)
 if [ $home_server ]; then
@@ -242,10 +245,8 @@ if [ $home_server ]; then
 fi
 
 if [ -n "$pod_name" ]; then
-    echo "Successful YAML. Start proxy params:"
-    echo "$pod_name|$pod_http_port|$reverse_proxy_port"
 	### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
-	( cat $yaml_file | \
+  modified_yaml=$( cat $yaml_file | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SD_UID\") | .value) |= \"$owner\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$FILE\"" | \
@@ -295,7 +296,27 @@ if [ -n "$pod_name" ]; then
 			sed "s|LOCAL_CLAIM_NAME|local-claim-${local_storage_name}|g"
 		fi
 	fi
-	) | tee >([ -z "$dryrun" ] && kubectl apply -f - || kubectl apply --validate=true --dry-run=client -f -)
+	)
+
+  echo "$modified_yaml" >> "$logfile"
+  # Now apply the yaml and save the output of the kubectl command
+  if [[ -z "$dryrun" ]]; then
+      kubectl_output=$( kubectl apply -f - < <(echo "$modified_yaml") )
+  else
+      kubectl_output=$( kubectl apply --validate=true --dry-run=client -f - < <(echo "$modified_yaml") )
+  fi
+
+  # If it worked, the output should look like 'pod/jupyter... created'. In that case report success
+  regex='^pod/.*created$'
+  if [[ $kubectl_output =~ $regex ]]; then
+      echo "SUCCESS: $pod_name|$pod_http_port|$reverse_proxy_port"
+      echo "$kubectl_output"
+      exit 0
+  else
+      echo "FAILURE: kubectl did not create pod"
+      echo "$kubectl_output"
+      exit 1
+  fi
 else
 	echo "ERROR: Parsing .metadata.name from YAML failed" >&2
 	exit 2

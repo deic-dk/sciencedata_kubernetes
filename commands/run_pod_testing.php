@@ -44,15 +44,24 @@ $cmd = '/bin/bash -c \'set -o pipefail;'.
 		$storage_path.'" "'.$tmpfile_name.'" 2>&1 | tee -a "'.$logFile.'"\'';
 
 exec($cmd, $output, $retval);
-
 fclose($tmpfile);
 
-$start_proxy_params = explode("|", $output[array_search("Successful YAML. Start proxy params:")+2]);
-
+$success_match = preg_grep('/^SUCCESS:.*$/', $output);
 // If okay, then send an http 200 OK with the name of the starting pod
-if($retval===0){
+if($retval===0 && count($success_match) > 0){
+    $result_info = str_replace("SUCCESS: ", "", $success_match[0]);
+    $start_proxy_params = explode("|", $result_info);
 	echo "<h1>OK</h1>";
 	echo "<pre>".$start_proxy_params[0]."</pre>";
+    $towrite = "SM: " . $success_match[0] . "\nRI: " . $result_info . "\n";
+    file_put_contents('/tmp/joshualogs/rewrite', $towrite);
+
+    // Wait for the pod to start and then run the reverse proxy if required
+    if (!empty($start_proxy_params[1]) && !empty($start_proxy_params[2])) {
+        $cmd = 'export KUBECONFIG=/etc/kubernetes/admin.conf; ' .
+            'run_pod_proxy_start "' . $result_info . '" >> "' . $logFile . '" 2>&1 &';
+        exec($cmd);
+    }
 }
 else{
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);
@@ -60,11 +69,3 @@ else{
 	echo "<pre>".implode("\n", $output)."</pre>";
 }
 
-// Wait for the pod to start and then run the reverse proxy
-$cmd = 'export KUBECONFIG=/etc/kubernetes/admin.conf; '.
-     'run_pod_proxy_start '.$start_proxy_params[0].' '.$start_proxy_params[1].' '.
-     $start_proxy_params[2].' >> '.$logFile.' 2>&1 &';
-
-exec($cmd);
-
-?>
