@@ -41,7 +41,6 @@ if [ -n "$user" ]; then
 	owner="${podInfo[5]}"
 	if [[ "$owner" != "" && "$owner" != "$user" ]]; then
 		echo "ERROR: pod $pod_name owned by $owner, NOT $user" >&2
-    echo "owner error\n owner: $owner\nuser: $user" >> "$logfile"
 		exit 1
 	fi
 fi
