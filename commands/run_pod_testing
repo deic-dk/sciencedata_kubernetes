@@ -312,6 +312,7 @@ if [ -n "$pod_name" ]; then
   if [[ $kubectl_output =~ $regex ]]; then
       echo "SUCCESS: $pod_name|$pod_http_port|$reverse_proxy_port"
       echo "$kubectl_output"
+      bash "$DIR"/run_pod_proxy_start "$pod_name|$pod_http_port|$reverse_proxy_port" &>> "$logfile" &
       exit 0
   else
       echo "FAILURE: kubectl did not create pod"

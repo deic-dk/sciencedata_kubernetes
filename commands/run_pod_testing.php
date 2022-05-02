@@ -53,15 +53,6 @@ if($retval===0 && count($success_match) > 0){
     $start_proxy_params = explode("|", $result_info);
 	echo "<h1>OK</h1>";
 	echo "<pre>".$start_proxy_params[0]."</pre>";
-    $towrite = "SM: " . $success_match[0] . "\nRI: " . $result_info . "\n";
-    file_put_contents('/tmp/joshualogs/rewrite', $towrite);
-
-    // Wait for the pod to start and then run the reverse proxy if required
-    if (!empty($start_proxy_params[1]) && !empty($start_proxy_params[2])) {
-        $cmd = 'export KUBECONFIG=/etc/kubernetes/admin.conf; ' .
-            'run_pod_proxy_start "' . $result_info . '" >> "' . $logFile . '" 2>&1 &';
-        exec($cmd);
-    }
 }
 else{
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);
