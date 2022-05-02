@@ -1,8 +1,15 @@
 #!/bin/bash
 
-pod_name=$1
-pod_http_port=$2
-reverse_proxy_port=$3
+info_str=$1
+readarray -d '|' -t array < <(printf '%s' "$info_str")
+pod_name="${array[0]}"
+pod_http_port="${array[1]}"
+reverse_proxy_port="${array[2]}"
+echo "STARTING PROXY
+infostr: $info_str
+podname: $pod_name
+httpport: $pod_http_port
+revpp: $reverse_proxy_port" >> '/tmp/joshualogs/proxy.txt'
 TMPDIR="/tmp"
 
 cmd="`echo $(readlink -f \"$0\")`"
