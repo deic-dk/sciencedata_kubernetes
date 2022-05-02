@@ -16,3 +16,6 @@ spec:
   nfs:
     path: /tank/storage/STORAGE_PATH # will be configured by run_pod.sh
     server: SERVER_IP # will be configured by run_pod.sh
+  claimRef:
+    name: NFS_VOLUME_NAME # will be configured by run_pod.sh
+    namespace: default
