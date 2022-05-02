@@ -179,20 +179,24 @@ fi
 
 # Check if home_server is set, otherwise check if $owner has a home server configured, finally to $SCIENCEDATA_IP
 if [ -z $home_server ]; then
-	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||'`
+	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> /dev/null`
 fi
-	
+
 if [ -n "$nfs_storage_path" ]; then
 	if [ -z $home_server ]; then
 		home_server=$SCIENCEDATA_IP
 	fi
 	# Check if directory exists
 	dir_exists_http_code=`curl --insecure -H "Depth: 0" -X PROPFIND -o /dev/null -w "%{http_code}" \
-	-u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/"`
+	-u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/" 2> /dev/null`
 	# Create if not
 	if [ "$dir_exists_http_code" != "207" ] && [ -z "$dryrun" ]; then
 		echo "INFO: https://${home_server}/storage/${nfs_storage_path}/ does NOT exist" >> "$logfile"
-		curl --insecure -X MKCOL -u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/"
+		dir_create_http_code=$(curl --insecure -X MKCOL -o /dev/null -w "%{http_code}" -u ${owner}: \
+                                "https://${home_server}/storage/${nfs_storage_path}/" 2> /dev/null)
+    if [[ $dir_create_http_code != 201 ]]; then
+      echo "WARNING: Failed to create storage directory" >> "$logfile"
+    fi
 	fi
   nfs_volume_name="nfs-${home_server}-${owner_str}-$(sed 's|/|-|g' <<< "${nfs_storage_path}")"
 	if [ $home_server ]; then
@@ -307,16 +311,15 @@ if [ -n "$pod_name" ]; then
       kubectl_output=$( kubectl apply --validate=true --dry-run=client -f - < <(echo "$modified_yaml") )
   fi
 
+  echo "$kubectl_output" >> "$logfile"
   # If it worked, the output should look like 'pod/jupyter... created'. In that case report success
   regex='^pod/.*created$'
   if [[ $kubectl_output =~ $regex ]]; then
       echo "SUCCESS: $pod_name|$pod_http_port|$reverse_proxy_port"
-      echo "$kubectl_output"
       bash "$DIR"/run_pod_proxy_start "$pod_name|$pod_http_port|$reverse_proxy_port" &>> "$logfile" &
       exit 0
   else
       echo "FAILURE: kubectl did not create pod"
-      echo "$kubectl_output"
       exit 1
   fi
 else
