@@ -1,10 +1,11 @@
 #!/bin/bash
 
+logfile='/var/log/kube.log'
 TMPDIR="/tmp"
-nowSeconds=`date +"%s"`
+now_seconds=`date +"%s"`
 
 echo "###" >&2
-echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri" >&2
+echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri|ed25519_hostkey|rsa_hostkey" >&2
 echo "###" >&2
 
 owner="$@"
@@ -42,14 +43,14 @@ echo $(kubectl get pods ${labels:+-l "$labels"} -o json) |\
     message="${array[10]}"
 
     if [ -n "$startTime" -a "$startTime" != null -a "$state" == "Running" ]; then
-        startSeconds=`date -d "$startTime" +"%s"`
-        diffSeconds=$((nowSeconds-startSeconds))
+        start_seconds=`date -d "$startTime" +"%s"`
+        diff_seconds=$((now_seconds-start_seconds))
     else
-        diffSeconds=0
+        diff_seconds=0
     fi
 
     if [[ -n "$message" ]] && [[ -z "$status" ]]; then
-		    echo "WARNING: $pod has problems: $message" >&2
+		    echo "WARNING: $pod_name has problems: $message" | tee -a "$logfile" >&2
 	  fi
 
 	  if [ -n "$domain" ]; then
@@ -57,10 +58,25 @@ echo $(kubectl get pods ${labels:+-l "$labels"} -o json) |\
 	  else
 		    owner="$user"
 	  fi
-    podName=`echo "$line" | awk '{split($0,a,"|"); print a[1];}'`
-	  nodePort=`kubectl get service "${podName}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
-	  uri=`cat ${TMPDIR}/uri-${podName} 2>/dev/null`
-    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" "${array[3]}"\
-           "${array[4]}" "$owner" "$diffSeconds" "$state:$status" "$nodePort" "${array[11]}" "${array[12]}" "$uri"
+    pod_name=`echo "$line" | awk '{split($0,a,"|"); print a[1];}'`
+	  node_port=`kubectl get service "${pod_name}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
+	  uri=`cat ${TMPDIR}/uri-${pod_name} 2>/dev/null`
+    hostkey_file="${TMPDIR}/hostkeys-${pod_name}"
+    if [[ -s $hostkey_file ]]; then
+        readarray -t algorithms < <(awk '{print $1;}' < "$hostkey_file")
+        readarray -t hashes < <(awk '{print $2;}' < "$hostkey_file")
+        # double check that the algorithms are written in the expected order
+        if [[ "${algorithms[0]}" == "ed25519" && "${algorithms[1]}" == "rsa" ]]; then
+            hostkey_ed="${hashes[0]}"
+            hostkey_rsa="${hashes[1]}"
+        else
+            echo "WARNING: Malformed hostkeys file in ${pod_name}" | tee -a "$logfile" >&2
+            hostkey_ed=""
+            hostkey_rsa=""
+        fi
+    fi
+    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" "${array[3]}"\
+           "${array[4]}" "$owner" "$diff_seconds" "$state:$status" "$node_port" "${array[11]}" "${array[12]}" "$uri"\
+           "$hostkey_ed" "$hostkey_rsa"
 done
 

@@ -49,10 +49,9 @@ fclose($tmpfile);
 $success_match = preg_grep('/^SUCCESS:.*$/', $output);
 // If okay, then send an http 200 OK with the name of the starting pod
 if($retval===0 && count($success_match) > 0){
-    $result_info = str_replace("SUCCESS: ", "", $success_match[0]);
-    $start_proxy_params = explode("|", $result_info);
+    $pod_name = str_replace("SUCCESS: ", "", $success_match[0]);
 	echo "<h1>OK</h1>";
-	echo "<pre>".$start_proxy_params[0]."</pre>";
+	echo "<pre>".$pod_name."</pre>";
 }
 else{
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);

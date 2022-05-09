@@ -33,6 +33,48 @@ ssh_public_key=""
 nfs_storage_path=""
 dryrun=
 
+#### Define slow functions to run in background after successful pod creation
+start_reverse_proxy() {
+	# Wait for one minute for pod to start
+	for i in {1..6}; do
+		# Find local IP
+		pod_ip=$(kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||')
+		if [[ -n "$pod_ip" ]]; then
+			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >> "$logfile"
+			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			sed -i "s|PODIP|$pod_ip|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			sed -i "s|PODPORT|$pod_http_port|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
+			export PATH=/bin/:/usr/bin:/usr/local/bin
+			caddy start -config "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}" &>> "/var/log/caddy/runpodproxy.log" &
+			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
+			break
+		fi
+		sleep 10
+	done
+	if [[ -z "$pod_ip" ]]; then
+		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}." >> "$logfile"
+    exit 1
+	else
+		# Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
+		( for i in {1..60}; do
+			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
+			sleep 5
+			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
+			[[ -e ${TMPDIR}/uri-${pod_name} ]] && [[ ! -s ${TMPDIR}/uri-${pod_name} ]] && rm ${TMPDIR}/uri-${pod_name}
+			[[ -s ${TMPDIR}/uri-${pod_name} ]] && break
+		done ) >& /dev/null
+	fi
+}
+copy_hostkeys() {
+    hostkey_file="${TMPDIR}/hostkeys-${pod_name}"
+    ( for i in {1..60}; do
+          sleep 5
+			    kubectl exec --stdin ${pod_name} -- cat /tmp/hostkeys 2>/dev/null > "$hostkey_file"
+			    [[ -e $hostkey_file ]] && [[ ! -s $hostkey_file ]] && rm $hostkey_file
+			    [[ -s $hostkey_file ]] && break
+      done ) >& /dev/null
+}
+
 while getopts "o:s:k:r:l:p:d" flag; do
 	case "$flag" in
 		o)
@@ -249,6 +291,9 @@ if [ $home_server ]; then
 	export my_home_server=`echo $home_server | sed "s|^$SCIENCEDATA_INTERNAL_NET|$SCIENCEDATA_PRIVATE_NET|"`
 fi
 
+cat $yaml_file > /tmp/joshualogs/baseyaml.yaml
+cat $yaml_file |\
+	  yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" > /tmp/joshualogs/onemod.yaml
 if [ -n "$pod_name" ]; then
 	### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
   modified_yaml=$( cat $yaml_file | \
@@ -315,8 +360,14 @@ if [ -n "$pod_name" ]; then
   # If it worked, the output should look like 'pod/jupyter... created'. In that case report success
   regex='^pod/.*created$'
   if [[ $kubectl_output =~ $regex ]]; then
-      echo "SUCCESS: $pod_name|$pod_http_port|$reverse_proxy_port"
-      bash "$DIR"/run_pod_proxy_start "$pod_name|$pod_http_port|$reverse_proxy_port" &>> "$logfile" &
+      echo "SUCCESS: $pod_name"
+      # begin background processes if required
+      if [[ -n "$pod_http_port" ]]; then
+          start_reverse_proxy >& /dev/null &
+      fi
+      if [[ -n "$ssh_public_key" ]]; then
+          copy_hostkeys >& /dev/null &
+      fi
       exit 0
   else
       echo "FAILURE: kubectl did not create pod"
