@@ -35,35 +35,36 @@ dryrun=
 
 #### Define slow functions to run in background after successful pod creation
 start_reverse_proxy() {
-	# Wait for one minute for pod to start
-	for i in {1..6}; do
-		# Find local IP
-		pod_ip=$(kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||')
-		if [[ -n "$pod_ip" ]]; then
-			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >> "$logfile"
-			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			sed -i "s|PODIP|$pod_ip|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			sed -i "s|PODPORT|$pod_http_port|" "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}"
-			export PATH=/bin/:/usr/bin:/usr/local/bin
-			caddy start -config "$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}" &>> "/var/log/caddy/runpodproxy.log" &
-			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
-			break
-		fi
-		sleep 10
-	done
-	if [[ -z "$pod_ip" ]]; then
-		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}." >> "$logfile"
-    exit 1
-	else
-		# Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
-		( for i in {1..60}; do
-			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
-			sleep 5
-			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
-			[[ -e ${TMPDIR}/uri-${pod_name} ]] && [[ ! -s ${TMPDIR}/uri-${pod_name} ]] && rm ${TMPDIR}/uri-${pod_name}
-			[[ -s ${TMPDIR}/uri-${pod_name} ]] && break
-		done ) >& /dev/null
-	fi
+    # Wait for one minute for pod to start
+    for i in {1..6}; do
+        # Find local IP
+        pod_ip=$(kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||')
+        if [[ -n "$pod_ip" ]]; then
+            echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >> "$logfile"
+            caddyfile="$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}-${pod_name}"
+            sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$caddyfile"
+            sed -i "s|PODIP|$pod_ip|" "$caddyfile"
+            sed -i "s|PODPORT|$pod_http_port|" "$caddyfile"
+            export PATH=/bin/:/usr/bin:/usr/local/bin
+            caddy start -config "$caddyfile" &>> "/var/log/caddy/runpodproxy.log" &
+            kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
+            break
+        fi
+        sleep 10
+    done
+    if [[ -z "$pod_ip" ]]; then
+        echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}." >> "$logfile"
+        exit 1
+    else
+        # Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
+        ( for i in {1..60}; do
+              # If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
+              sleep 5
+              kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
+              [[ -e ${TMPDIR}/uri-${pod_name} ]] && [[ ! -s ${TMPDIR}/uri-${pod_name} ]] && rm ${TMPDIR}/uri-${pod_name}
+              [[ -s ${TMPDIR}/uri-${pod_name} ]] && break
+          done ) >& /dev/null
+    fi
 }
 copy_hostkeys() {
     hostkey_file="${TMPDIR}/hostkeys-${pod_name}"
