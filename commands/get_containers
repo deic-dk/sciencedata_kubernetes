@@ -1,47 +1,81 @@
 #!/bin/bash
 
-user="$@"
+logfile='/var/log/kube.log'
 TMPDIR="/tmp"
+now_seconds=`date +"%s"`
 
 echo "###" >&2
-echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri" >&2
+echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri|ed25519_hostkey|rsa_hostkey" >&2
 echo "###" >&2
-kubectl get pods -o json | jq -r '.items[].metadata.name' | while read pod; do
-	podJson="`kubectl get pod "$pod" -o json`"
-	hostip=`echo "$podJson" | jq -r '.status.hostIP' | sed 's|null||'`
-	podip=`echo "$podJson" | jq -r '.status.podIP' | sed 's|null||'`
-	#owner=`echo "$podJson" | jq -r '.metadata.labels | .user+"@"+.domain'`
-	username=`echo "$podJson" | jq -r '.metadata.labels | .user' | sed -E 's|^null$||'`
-	domain=`echo "$podJson" | jq -r '.metadata.labels | .domain' | sed -E 's|^null$||'`
-	# Crashed pods will also be in phase Running
-	state=`echo "$podJson" | jq -r '.status.phase'`
-	# Unschedulable pods will have no .status.containerStatuses, but have .status.conditions[].message
-	message=`echo "$podJson" | jq -r '.status.conditions[]?.message?' | grep -E -v '^null$'`
-	status=`echo "$podJson" | jq -r '.status.containerStatuses[]?.state[]?  | join(", ")'`
-	if [[ -n "$message" ]] && [[ -z "$status" ]]; then
-		echo "WARNING: $pod has problems: $message" >&2
-	fi
-	echo "$status" | grep "," >& /dev/null
-	if [ $? -ne 0 ] && [ "$state" == "Running" ]; then
-		startTime=`echo "$podJson" | jq -r '.status.startTime'`
-		startSeconds=`date -d "$startTime" +"%s"`
-		nowSeconds=`date  +"%s"`
-		diffSeconds=$((nowSeconds-startSeconds))
-	fi
-	if [ -n "$domain" ]; then
-		owner="$username@$domain"
-	else
-		owner="$username"
-	fi
-	if [ -n "$user" -a "$user" != "$owner" ]; then
-		continue
-	fi
-	nodePort=`kubectl get service "${pod}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
-	reverseProxyPort=`echo "$podJson" | jq -r '.metadata.labels.reverseProxyPort' | sed -E 's|^null$||'`
-	uri=`cat ${TMPDIR}/uri-${pod} 2>/dev/null`
 
-	kubectl get pod "$pod" -o json | jq -r --arg POD "$pod" --arg HOSTIP "$hostip" --arg PODIP "$podip" \
-	--arg OWNER "$owner" --arg AGE "$diffSeconds" --arg STATUS "${state}:${status}" --arg NODEPORT "$nodePort"  \
-	--arg REVERSEPROXYPORT "$reverseProxyPort" --arg URI "$uri" \
-	'.spec.containers[] | $POD+"|"+.name+"|"+.image+"|"+$PODIP+"|"+$HOSTIP+"|"+$OWNER+"|"+$AGE+"|"+$STATUS+"|"+$NODEPORT+"|"+ [.env[]?|select(.name=="USERNAME")][0]?.value +"|"+$REVERSEPROXYPORT+"|"+$URI'
-done | sed 's|@$||'
+owner="$@"
+user=`echo $owner | awk -F@ '{print $1}'`
+domain=`echo $owner | awk -F@ '{print $2}'`
+
+if [[ -n $owner ]]; then
+    labels="user=$user,domain=$domain"
+fi
+
+echo $(kubectl get pods ${labels:+-l "$labels"} -o json) |\
+    jq -r '.items[] | {name: .metadata.name, '\
+'cname: [.spec.containers[].name][0]?, '\
+'image: [.spec.containers[].image][0]?, '\
+'podIP: .status.podIP?, '\
+'hostIP: .status.hostIP?, '\
+'user: .metadata.labels.user?, '\
+'domain: .metadata.labels.domain?, '\
+'starttime: .status.startTime?, '\
+'state: .status.phase?, '\
+'message: .status|(.conditions? // [])|map(select(has("message")).message)[0]?, '\
+'status: (.status.containerStatuses[]?.state[]? // []) | join(", "), '\
+'sshuser: .spec.containers[]|[.env[]?]|map(select(.name=="USERNAME").value)[0]?, '\
+'rpport: .metadata.labels.reverseProxyPort?}' |\
+    jq -r '.name+"|"+.cname+"|"+.image+"|"+.podIP+"|"+.hostIP+"|"+.user+"|"+'\
+'.domain+"|"+.starttime+"|"+.status+"|"+.state+"|"+.message+"|"+.sshuser+"|"+.rpport+"|"' |\
+    while read line; do
+        readarray -d '|' -t array < <(echo "$line")
+        # 0: name, 1: cname, 2: image, 3: podIP, 4: hostIP, 5: user, 6: domain, 7: starttime, 8: status, 9: state, 10: message, 11: sshuser, 12: rpport
+        user="${array[5]}"
+        domain="${array[6]}"
+        startTime="${array[7]}"
+        status="${array[8]}"
+        state="${array[9]}"
+        message="${array[10]}"
+
+        if [ -n "$startTime" -a "$startTime" != null -a "$state" == "Running" ]; then
+            start_seconds=`date -d "$startTime" +"%s"`
+            diff_seconds=$((now_seconds-start_seconds))
+        else
+            diff_seconds=0
+        fi
+
+        if [[ -n "$message" ]] && [[ -z "$status" ]]; then
+            echo "WARNING: $pod_name has problems: $message" | tee -a "$logfile" >&2
+        fi
+
+        if [ -n "$domain" ]; then
+            owner="$user@$domain"
+        else
+            owner="$user"
+        fi
+        pod_name=`echo "$line" | awk '{split($0,a,"|"); print a[1];}'`
+        node_port=`kubectl get service "${pod_name}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
+        uri=`cat ${TMPDIR}/uri-${pod_name} 2>/dev/null`
+        hostkey_file="${TMPDIR}/hostkeys-${pod_name}"
+        if [[ -s $hostkey_file ]]; then
+            readarray -t algorithms < <(awk '{print $1;}' < "$hostkey_file")
+            readarray -t hashes < <(awk '{print $2;}' < "$hostkey_file")
+            # double check that the algorithms are written in the expected order
+            if [[ "${algorithms[0]}" == "ed25519" && "${algorithms[1]}" == "rsa" ]]; then
+                hostkey_ed="${hashes[0]}"
+                hostkey_rsa="${hashes[1]}"
+            else
+                echo "WARNING: Malformed hostkeys file in ${pod_name}" | tee -a "$logfile" >&2
+                hostkey_ed=""
+                hostkey_rsa=""
+            fi
+        fi
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" "${array[3]}"\
+               "${array[4]}" "$owner" "$diff_seconds" "$state:$status" "$node_port" "${array[11]}" "${array[12]}" "$uri"\
+               "$hostkey_ed" "$hostkey_rsa"
+done

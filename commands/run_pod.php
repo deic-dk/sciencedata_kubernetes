@@ -44,12 +44,14 @@ $cmd = '/bin/bash -c \'set -o pipefail;'.
 		$storage_path.'" "'.$tmpfile_name.'" 2>&1 | tee -a "'.$logFile.'"\'';
 
 exec($cmd, $output, $retval);
-
 fclose($tmpfile);
 
-if($retval===0){
+$success_match = preg_grep('/^SUCCESS:.*$/', $output);
+// If okay, then send an http 200 OK with the name of the starting pod
+if($retval===0 && count($success_match) > 0){
+    $pod_name = str_replace("SUCCESS: ", "", $success_match[0]);
 	echo "<h1>OK</h1>";
-	echo "<pre>".implode("\n", $output)."</pre>";
+	echo "<pre>".$pod_name."</pre>";
 }
 else{
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);
@@ -57,4 +59,3 @@ else{
 	echo "<pre>".implode("\n", $output)."</pre>";
 }
 
-?>
