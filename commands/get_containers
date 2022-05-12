@@ -42,6 +42,7 @@ echo $(kubectl get pods ${labels:+-l "$labels"} -o json) |\
         state="${array[9]}"
         message="${array[10]}"
 
+        pod_name=`echo "$line" | awk '{split($0,a,"|"); print a[1];}'`
         if [ -n "$startTime" -a "$startTime" != null -a "$state" == "Running" ]; then
             start_seconds=`date -d "$startTime" +"%s"`
             diff_seconds=$((now_seconds-start_seconds))
@@ -58,7 +59,6 @@ echo $(kubectl get pods ${labels:+-l "$labels"} -o json) |\
         else
             owner="$user"
         fi
-        pod_name=`echo "$line" | awk '{split($0,a,"|"); print a[1];}'`
         node_port=`kubectl get service "${pod_name}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
         uri=`cat ${TMPDIR}/uri-${pod_name} 2>/dev/null`
         hostkey_file="${TMPDIR}/hostkeys-${pod_name}"
