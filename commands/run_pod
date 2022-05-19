@@ -358,16 +358,9 @@ if [ -n "$pod_name" ]; then
   fi
 
   echo "$kubectl_output" >> "$logfile"
-  # If it worked, the output should look like 'pod/jupyter... created'. In that case report success
-  regex='^pod/.*created$'
-  success="false"
-  while read line; do
-      if [[ $line =~ $regex ]]; then
-          success="true"
-          break
-      fi
-  done < <(echo "$kubectl_output")
-  if [[ $success == "true" ]]; then
+  # If it worked, there should be a line in the output like 'pod/jupyter... created'. In that case report success
+  regex='.*^pod/[^'$'\n'']+created$.*'
+  if [[ $kubectl_output =~ $regex ]]; then
       echo "SUCCESS: $pod_name"
       # begin background processes if required
       if [[ -n "$pod_http_port" ]]; then
