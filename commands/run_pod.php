@@ -49,11 +49,15 @@ fwrite($tmpfile, $yaml);
 $metadata = stream_get_meta_data($tmpfile);
 $tmpfile_name = $metadata['uri'];
 
-$cmd = '/bin/bash -c \'set -o pipefail;'.
-		'export KUBECONFIG=/etc/kubernetes/admin.conf'.
-		(empty($file)?'':'; export FILE="'.$file.'"').'; run_pod -o "'.$owner.
-		'" -s '.$_SERVER['REMOTE_ADDR'].' -k "'.$public_key.'" -r "'.
-		$storage_path.'" "'.$tmpfile_name.'" 2>&1 | tee -a "'.$logFile.'"\'';
+$cmd = '/bin/bash -c \'set -o pipefail;' . // use bash with pipefail so the error code from run_pod gets propagated
+    'export KUBECONFIG=/etc/kubernetes/admin.conf;' . // use kubernetes config
+    (empty($file) ? '' : ' export FILE=' . escapeshellarg($file) . ';') .
+    ' run_pod_testing "$@" 2>&1 | tee -a "' . $logFile . '"\' --' . // call run_pod with all subsequent arguments, pass stdout/err to append the log
+    ' -o ' . escapeshellarg($owner) .
+    ' -s ' . escapeshellarg($_SERVER['REMOTE_ADDR']) .
+    ' -k ' . escapeshellarg($public_key) .
+    ' -r ' . escapeshellarg($storage_path) .
+    ' ' . escapeshellarg($tmpfile_name);
 
 exec($cmd, $output, $retval);
 fclose($tmpfile);

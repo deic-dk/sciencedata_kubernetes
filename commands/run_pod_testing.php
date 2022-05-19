@@ -15,13 +15,25 @@ $output = null;
 $retval = null;
 $server_ip = $_SERVER['REMOTE_ADDR'];
 
-// If it's a path/URI, assume it's on the originating silo and prepend its URL
-$yaml_url = ltrim($yaml_url, "/");
-if(strpos($yaml_url, "shared")===0 || strpos($yaml_url, "files")===0 || strpos($yaml_url, "group")===0 || strpos($yaml_url, "sharingin")===0 || strpos($yaml_url, "storage")===0){
-	$server_ip = urlencode($owner).'@'.$server_ip;
-}
-if(strpos($yaml_url, "https://")===false){
-	$yaml_url = "https://".$server_ip.'/'.$yaml_url;
+$allow_user_manifests = false; // An arbitrary manifest could give a root shell on the node
+// Constraints that would allow this securely could be implemented, e.g. using other than /etc/kubernetes/admin.conf if unofficial yaml
+// with SecurityContext constraints for that user
+if ($allow_user_manifests) {
+    // If it's a path/URI, assume it's on the originating silo and prepend its URL
+    $yaml_url = ltrim($yaml_url, "/");
+    if(strpos($yaml_url, "shared")===0 || strpos($yaml_url, "files")===0 || strpos($yaml_url, "group")===0 || strpos($yaml_url, "sharingin")===0 || strpos($yaml_url, "storage")===0){
+        $server_ip = urlencode($owner).'@'.$server_ip;
+    }
+    if(strpos($yaml_url, "https://")===false){
+        $yaml_url = "https://".$server_ip.'/'.$yaml_url;
+    }
+} else {
+    // make sure the manifest is hosted in our repo on github
+    $official_yaml_regex = '/https:\/\/raw[.]githubusercontent[.]com\/deic-dk\/pod_manifests.*/';
+    if (!preg_match($official_yaml_regex, $yaml_url)) {
+        echo "<h1>Error. Missing or forbidden yaml</h1>";
+        exit;
+    }
 }
 
 $arrContextOptions=array(
@@ -37,11 +49,15 @@ fwrite($tmpfile, $yaml);
 $metadata = stream_get_meta_data($tmpfile);
 $tmpfile_name = $metadata['uri'];
 
-$cmd = '/bin/bash -c \'set -o pipefail;'.
-		'export KUBECONFIG=/etc/kubernetes/admin.conf'.
-		(empty($file)?'':'; export FILE="'.$file.'"').'; run_pod_testing -o "'.$owner.
-		'" -s '.$_SERVER['REMOTE_ADDR'].' -k "'.$public_key.'" -r "'.
-		$storage_path.'" "'.$tmpfile_name.'" 2>&1 | tee -a "'.$logFile.'"\'';
+$cmd = '/bin/bash -c \'set -o pipefail;'. // use bash with pipefail so the error code from run_pod gets propagated
+     'export KUBECONFIG=/etc/kubernetes/admin.conf;'. // use kubernetes config
+     (empty($file) ? '' : ' export FILE=' . escapeshellarg($file) . ';').
+     ' run_pod_testing "$@" 2>&1 | tee -a "' . $logFile . '"\' --' . // call run_pod with all subsequent arguments, pass stdout/err to append the log
+     ' -o ' . escapeshellarg($owner) .
+     ' -s ' . escapeshellarg($_SERVER['REMOTE_ADDR']) .
+     ' -k ' . escapeshellarg($public_key).
+     ' -r ' . escapeshellarg($storage_path) .
+     ' ' . escapeshellarg($tmpfile_name);
 
 exec($cmd, $output, $retval);
 fclose($tmpfile);
