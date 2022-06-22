@@ -292,9 +292,7 @@ if [ $home_server ]; then
 	export my_home_server=`echo $home_server | sed "s|^$SCIENCEDATA_INTERNAL_NET|$SCIENCEDATA_PRIVATE_NET|"`
 fi
 
-cat $yaml_file > /tmp/joshualogs/baseyaml.yaml
 cat $yaml_file |\
-	  yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" > /tmp/joshualogs/onemod.yaml
 if [ -n "$pod_name" ]; then
 	### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
   modified_yaml=$( cat $yaml_file | \

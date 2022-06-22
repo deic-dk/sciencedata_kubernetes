@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# run_pod -o owner -k public_key -r nfs_storage_path -l local_storage_path yaml_file
+# run_pod -o owner -k public_key -r silo_storage_path -l local_storage_path yaml_file
 # Notice that the mount point for the nfs and/or local volume must be specified in the yaml file.
 # E.g.
 # run_pod -o fror@dtu.dk  -k "`cat ~/.ssh/id_rsa.pub`" -r www /root/sciencedata_kubernetes/pod_manifests/ubuntu_sciencedata.yaml
@@ -30,7 +30,7 @@ TMPDIR="/tmp"
 yaml_file=""
 owner=""
 ssh_public_key=""
-nfs_storage_path=""
+silo_storage_path=""
 dryrun=
 
 #### Define slow functions to run in background after successful pod creation
@@ -94,7 +94,7 @@ while getopts "o:s:k:r:l:p:d" flag; do
 		r)
 			# Path on home server to be claimed, relative to /tank/storage/owner/
 			# Notice that the mountpoint is specified in the pod yaml
-			nfs_storage_path=$OPTARG
+			silo_storage_path=$OPTARG
 			;;
 		l)
 			# Path on local server to be claimed - absolute.
@@ -225,42 +225,52 @@ if [ -z $home_server ]; then
 	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> /dev/null`
 fi
 
-# TODO: change nfs_storage_path to something that reflects its new usage as a dir to pass to ENV
-if [ -n "$nfs_storage_path" ]; then
+# TODO: change silo_storage_path to something that reflects its new usage as a dir to pass to ENV
+if [ -n "$silo_storage_path" ]; then
 	if [ -z $home_server ]; then
 		home_server=$SCIENCEDATA_IP
 	fi
 	# Check if directory exists
 	dir_exists_http_code=`curl --insecure -H "Depth: 0" -X PROPFIND -o /dev/null -w "%{http_code}" \
-	-u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/" 2> /dev/null`
+	-u ${owner}: "https://${home_server}/storage/${silo_storage_path}/" 2> /dev/null`
 	# Create if not
 	if [ "$dir_exists_http_code" != "207" ] && [ -z "$dryrun" ]; then
-		echo "INFO: https://${home_server}/storage/${nfs_storage_path}/ does NOT exist" >> "$logfile"
+		echo "INFO: https://${home_server}/storage/${silo_storage_path}/ does NOT exist" >> "$logfile"
 		dir_create_http_code=$(curl --insecure -X MKCOL -o /dev/null -w "%{http_code}" -u ${owner}: \
-                                "https://${home_server}/storage/${nfs_storage_path}/" 2> /dev/null)
+                                "https://${home_server}/storage/${silo_storage_path}/" 2> /dev/null)
     if [[ $dir_create_http_code != 201 ]]; then
       echo "WARNING: Failed to create storage directory" >> "$logfile"
     fi
 	fi
 fi
 
-# There should be one nfs PV for each user that has any pods
-nfs_volume_name="nfs-${home_server}-${owner_str}"
-if [ $home_server ]; then
-	# Check if the volume is already mounted
-	kubectl get persistentvolume | grep "^${nfs_volume_name} " >& /dev/null
-	if [ "$?" -ne "0" ]; then
-		create_nfs_volume="yes"
-	else
-		kubectl get pv -o yaml | yq '.items[] | (.spec.nfs.server+":"+.spec.nfs.path)' | grep "${home_server}:/tank/storage/${owner_str}" >& /dev/null
+# If the manifest tries to mount a volume with the name "sciencedata", then this script should include it
+# as a volume and make sure the PV and PVC exist
+if [[ $(cat $yaml_file | yq -r '.spec.containers[].volumeMounts? | if . == null then [] else . end | map(select(.name=="sciencedata"))[0]?') == "null" ]]; then
+	mounts_silo_storage=0
+else
+	mounts_silo_storage=1
+fi
+
+if [[ $mounts_silo_storage == 1 ]]; then
+	# There should be one nfs PV for each user that has any pods
+	nfs_volume_name="nfs-${home_server}-${owner_str}"
+	if [ $home_server ]; then
+		# Check if the volume is already mounted
+		kubectl get persistentvolume | grep "^${nfs_volume_name} " >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_volume="yes"
+		else
+			kubectl get pv -o yaml | yq '.items[] | (.spec.nfs.server+":"+.spec.nfs.path)' | grep "${home_server}:/tank/storage/${owner_str}" >& /dev/null
+			if [ "$?" -ne "0" ]; then
+				create_nfs_volume="yes"
+			fi
 		fi
-	fi
-	# Check if a claim has already been made on $nfs_storage_path
-	kubectl get PersistentVolumeClaim | grep  "^${nfs_volume_name} " >& /dev/null
-	if [ "$?" -ne "0" ]; then
-		create_nfs_claim="yes"
+		# Check if a claim has already been made on the volume
+		kubectl get PersistentVolumeClaim | grep  "^${nfs_volume_name} " >& /dev/null
+		if [ "$?" -ne "0" ]; then
+			create_nfs_claim="yes"
+		fi
 	fi
 fi
 
@@ -295,9 +305,8 @@ if [ $home_server ]; then
 	export my_home_server=`echo $home_server | sed "s|^$SCIENCEDATA_INTERNAL_NET|$SCIENCEDATA_PRIVATE_NET|"`
 fi
 
-cat $yaml_file > /tmp/joshualogs/baseyaml.yaml
+
 cat $yaml_file |\
-	  yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" > /tmp/joshualogs/onemod.yaml
 if [ -n "$pod_name" ]; then
 	### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
   modified_yaml=$( cat $yaml_file | \
@@ -305,13 +314,14 @@ if [ -n "$pod_name" ]; then
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SD_UID\") | .value) |= \"$owner\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$FILE\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
+	yq -r "(.spec.containers[]?.env[]? | select(.name == \"STORAGE_PATH\") | .value) |= \"${silo_storage_path}\"" | \
 	sed "s|HOME_SERVER/storage/mathpass|${my_home_server}/storage/mathpass|" | \
 	yq -r -y ".metadata.name=\"$pod_name\"" |\
 	yq -r -y ".metadata.labels.user=\"$user\"" | \
 	yq -r -y ".metadata.labels.domain=\"$domain\"" |\
 	yq -r -y ".metadata.labels.app=\"$pod_name\"" | \
 	( [ -z "$pod_http_port" ] && cat || yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" ) |\
-	( [ -z "$nfs_storage_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]") |\
+	( [ -z "$mounts_silo_storage" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]") |\
 	( [ -z "$local_storage_name" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"local\", \"persistentVolumeClaim\": {\"claimName\": \"local-claim-${local_storage_name}\"}}]")
 	### SSH service
 	if [ -n "$ssh_public_key" ]; then
@@ -319,7 +329,7 @@ if [ -n "$pod_name" ]; then
 		cat "$SSH_SERVICE_YAML_FILE"| yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
 		yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
 	fi
-	if [ -n "$nfs_storage_path" ]; then
+	if [ -n "$mounts_silo_storage" ]; then
 		### NFS volume
 		if [ -n "$create_nfs_volume" ]; then
 			echo "---"
