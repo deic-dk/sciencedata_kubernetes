@@ -52,7 +52,7 @@ $tmpfile_name = $metadata['uri'];
 $cmd = '/bin/bash -c \'set -o pipefail;' . // use bash with pipefail so the error code from run_pod gets propagated
     'export KUBECONFIG=/etc/kubernetes/admin.conf;' . // use kubernetes config
     (empty($file) ? '' : ' export FILE=' . escapeshellarg($file) . ';') .
-    ' run_pod_testing "$@" 2>&1 | tee -a "' . $logFile . '"\' --' . // call run_pod with all subsequent arguments, pass stdout/err to append the log
+    ' run_pod "$@" 2>&1 | tee -a "' . $logFile . '"\' --' . // call run_pod with all subsequent arguments, pass stdout/err to append the log
     ' -o ' . escapeshellarg($owner) .
     ' -s ' . escapeshellarg($_SERVER['REMOTE_ADDR']) .
     ' -k ' . escapeshellarg($public_key) .
