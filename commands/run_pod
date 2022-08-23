@@ -242,6 +242,7 @@ if [ -n "$nfs_storage_path" ]; then
     fi
 	fi
   nfs_volume_name="nfs-${home_server}-${owner_str}-$(sed 's|/|-|g' <<< "${nfs_storage_path}")"
+  nfs_claim_name=$nfs_volume_name # just use the same name
 	if [ $home_server ]; then
 		# Check if the volume is already mounted
 		kubectl get persistentvolume | grep "^${nfs_volume_name} " >& /dev/null
@@ -254,7 +255,7 @@ if [ -n "$nfs_storage_path" ]; then
 			fi
 		fi
 		# Check if a claim has already been made on $nfs_storage_path
-		kubectl get PersistentVolumeClaim | grep  "^${nfs_volume_name} " >& /dev/null
+		kubectl get persistentvolumeclaim | grep  "^${nfs_claim_name} " >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_claim="yes"
 		fi
@@ -327,7 +328,8 @@ if [ -n "$pod_name" ]; then
 		if [ -n "$create_nfs_claim" ]; then
 			echo "---"
 			cat "$NFS_CLAIM_YAML_FILE" | \
-			sed "s|NFS_CLAIM_NAME|${nfs_volume_name}|g"
+			sed "s|NFS_VOLUME_NAME|${nfs_volume_name}|g" | \
+			sed "s|NFS_CLAIM_NAME|${nfs_claim_name}|g"
 		fi
 	fi
 	if [ -n "$local_storage_name" ]; then

@@ -10,4 +10,4 @@ spec:
   resources:
     requests:
       storage: 10Gi # ignored
-  volumeName: NFS_CLAIM_NAME
+  volumeName: NFS_VOLUME_NAME
