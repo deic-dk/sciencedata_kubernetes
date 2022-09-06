@@ -28,7 +28,7 @@ $retval = null;
 $server_ip = $_SERVER['REMOTE_ADDR'];
 
 // Only trusted service accounts are allowed to run arbitrary yaml
-if(in_array($owner, $admins){
+if(in_array($owner, $admins)){
 	// If it's a path/URI, assume it's on the originating silo and prepend its URL
 	$yaml_url = ltrim($yaml_url, "/");
 	if(strpos($yaml_url, "shared")===0 || strpos($yaml_url, "files")===0 || strpos($yaml_url, "group")===0 || strpos($yaml_url, "sharingin")===0 || strpos($yaml_url, "storage")===0){
