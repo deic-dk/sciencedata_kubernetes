@@ -52,7 +52,7 @@ stop_reverse_proxy() {
 		        $run kill "$pid"
 		        rm "$TMPDIR/Caddyfile-${ip}-"* >& /dev/null
 		        rm "$TMPDIR/uri-${pod_name}"  >& /dev/null
-            echo "INFO: Stopped caddy proxy $TMPDIR/Caddyfile-${ip}-..." >> "$logfile"
+            echo "INFO: Stopped caddy proxy $TMPDIR/Caddyfile-${ip}-, $TMPDIR/uri-${pod_name}..." >> "$logfile"
 	      fi
     fi
 }

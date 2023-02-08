@@ -40,6 +40,7 @@ start_reverse_proxy() {
         # Find local IP
         pod_ip=$(kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||')
         if [[ -n "$pod_ip" ]]; then
+            rm ${TMPDIR}/uri-${pod_name}
             echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >> "$logfile"
             caddyfile="$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}-${pod_name}"
             sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$caddyfile"
