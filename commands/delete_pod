@@ -50,8 +50,8 @@ stop_reverse_proxy() {
 	      pid=`ps auxw | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-${ip}-.*"  | grep -v grep | awk '{print $2}'`
 	      if [[ -n $pid ]]; then
 		        $run kill "$pid"
-		        rm "$TMPDIR/Caddyfile-${ip}-"* >& /dev/null
-		        rm "$TMPDIR/uri-${pod_name}"  >& /dev/null
+		        rm "$TMPDIR/Caddyfile-${ip}-"* >> "$logfile" 2>&1
+		        rm "$TMPDIR/uri-${pod_name}"  >> "$logfile" 2>&1
             echo "INFO: Stopped caddy proxy $TMPDIR/Caddyfile-${ip}-, $TMPDIR/uri-${pod_name}..." >> "$logfile"
 	      fi
     fi
