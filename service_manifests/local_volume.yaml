@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: LOCAL_VOLUME_NAME # will be configured by run_pod.sh
+  name: LOCAL_VOLUME_NAME # will be configured by run_pod
   labels:
     type: local
 spec:
@@ -13,4 +13,4 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: manual
   hostPath:
-    path: STORAGE_PATH # will be configured by run_pod.sh
+    path: STORAGE_PATH # will be configured by run_pod

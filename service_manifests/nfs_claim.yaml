@@ -1,7 +1,7 @@
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
-  name: NFS_CLAIM_NAME # will be configured by run_pod.sh
+  name: NFS_CLAIM_NAME # will be configured by run_pod
 spec:
   storageClassName: nfs
   #storageClassName: ""

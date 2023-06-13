@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: NFS_VOLUME_NAME # will be configured by run_pod.sh
+  name: NFS_VOLUME_NAME # will be configured by run_pod
 spec:
   capacity:
     storage: 10Gi # ignored
@@ -14,8 +14,8 @@ spec:
     - hard
     - nfsvers=4.1
   nfs:
-    path: /tank/storage/STORAGE_PATH # will be configured by run_pod.sh
+    path: /tank/storage/STORAGE_PATH # will be configured by run_pod
     server: SERVER_IP # will be configured by run_pod.sh
   claimRef:
-    name: NFS_VOLUME_NAME # will be configured by run_pod.sh
+    name: NFS_VOLUME_NAME # will be configured by run_pod
     namespace: default

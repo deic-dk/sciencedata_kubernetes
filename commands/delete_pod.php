@@ -22,12 +22,15 @@ if(empty($owner) || empty($pod)){
 exec('export KUBECONFIG=/etc/kubernetes/admin.conf; delete_pod -u "'.$owner.'" "'.$pod.'"', $output, $retval);
 
 if($retval===0){
-	echo "<h1>OK</h1>";
+	echo "{\"data\":{\"name\":\"$pod\", ".
+			"\"message\":\"OK\"}, ".
+			"\"status\":\"success\"}";
 }
 else{
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);
-	echo "<h1>Something went wrong!</h1>";
-	echo "<pre>$output</pre>";
+	echo "{\"data\":{\"error\": \"".$output."\", ".
+									"\"message\":\"Something went wrong...\"}, ".
+				"\"status\":\"error\"}";
 }
 
 ?>

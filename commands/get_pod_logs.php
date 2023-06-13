@@ -14,9 +14,11 @@ $retval = null;
 
 if(empty($owner) || empty($pod)){
 	header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
-	echo "<h1>Missing parameter(s)!</h1>";
+	echo "{\"data\":{\"message\":\"Missing owner or pod name\"}, ".
+				"\"status\":\"error\"}";
 	exit;
-}else {
+}
+else{
 	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_pod_logs -u "$owner" "$pod"`;
 }
 ?>

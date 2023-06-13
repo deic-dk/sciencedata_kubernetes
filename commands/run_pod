@@ -131,7 +131,7 @@ if [ -z "$yaml_file" ]; then
 fi
 
 if [ ! -f "$yaml_file" ]; then
-	echo "ERROR: Input file not found" >&2
+	echo "ERROR: Input file $yaml_file not found" >&2
 	exit 1
 fi
 
@@ -207,7 +207,7 @@ owner_str=`echo $owner | sed 's|[@._]|-|g'`
 
 pod_name="`cat \"$yaml_file\" | yq -r .metadata.name | head -1`-${owner_str}"
 
-# Try up to 9 times to append to name if pod with this name is already running (i.service/jupyter-fror-dtu-dk-sshe. allow 10 copies per user)
+# Try up to 9 times to append to name if pod with this name is already running (i.service/jupyter-fror-dtu-dk-ssh. allow 10 copies per user)
 new_pod_name="${pod_name}"
 for i in {1..9}; do
 	kubectl get pod "$new_pod_name" >& /dev/null

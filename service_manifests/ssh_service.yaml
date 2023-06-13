@@ -1,16 +1,16 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: ubuntu-focal-ssh # will be configured by run_pod.sh
+  name: ubuntu-focal-ssh # will be configured by run_pod
 spec:
   #externalIPs:
   #  - kube.sciencedata.dk
-  #type: NodePort
-  type: LoadBalancer
+  type: NodePort
   ports:
-  - port: 22
+  - port: 22 
+    # nodePort will be assined by Kubernetes
     targetPort: 22
     name: ssh
     protocol: TCP
   selector:
-    app: ubuntu # will be configured by run_pod.sh
+    app: ubuntu # will be configured by run_pod

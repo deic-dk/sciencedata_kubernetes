@@ -1,7 +1,7 @@
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
-  name: LOCAL_CLAIM_NAME # will be configured by run_pod.sh
+  name: LOCAL_CLAIM_NAME # will be configured by run_pod
 spec:
   storageClassName: manual
   accessModes:
