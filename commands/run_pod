@@ -47,7 +47,7 @@ start_reverse_proxy() {
             sed -i "s|PODIP|$pod_ip|" "$caddyfile"
             sed -i "s|PODPORT|$pod_http_port|" "$caddyfile"
             export PATH=/bin/:/usr/bin:/usr/local/bin
-            caddy start -config "$caddyfile" &>> "/var/log/caddy/runpodproxy.log" &
+            caddy start -config "$caddyfile" &>> "$logfile" &
             kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
             break
         fi
@@ -67,6 +67,7 @@ start_reverse_proxy() {
           done ) >& /dev/null
     fi
 }
+
 copy_hostkeys() {
     hostkey_file="${TMPDIR}/hostkeys-${pod_name}"
     ( for i in {1..60}; do
