@@ -31,7 +31,7 @@ pod_name=${@:$OPTIND:1}
 DIR="$(dirname "$(readlink -f "$0")")"
 
 get_pod_data() {
-    $DIR/get_containers_testing ${user:+"$user"} 2>&1 | grep "^$pod_name|"
+    $DIR/get_containers $user 2>&1 | grep "^$pod_name|"
 }
 readarray -d '|' -t podInfo < <(get_pod_data)
 
@@ -46,12 +46,16 @@ fi
 
 stop_reverse_proxy() {
     ip="${podInfo[3]}"
+    port="${podInfo[10]}"
+    echo "ip: ${podInfo[3]}" >> "$logfile"
+    echo "owner: ${podInfo[5]}" >> "$logfile"
+    echo "port: ${podInfo[10]}" >> "$logfile"
     if [[ -n "$ip" ]]; then
 	      pid=`ps auxw | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-${ip}-.*"  | grep -v grep | awk '{print $2}'`
 	      if [[ -n $pid ]]; then
 		        $run kill "$pid"
 		        rm "$TMPDIR/Caddyfile-${ip}-"* >> "$logfile" 2>&1
-		        rm "$TMPDIR/uri-${pod_name}"  >> "$logfile" 2>&1
+		        rm "$TMPDIR/uri-${pod_name}"  >& /dev/null
             echo "INFO: Stopped caddy proxy $TMPDIR/Caddyfile-${ip}-, $TMPDIR/uri-${pod_name}..." >> "$logfile"
 	      fi
     fi
@@ -61,9 +65,8 @@ stop_ssh_service() {
     ssh_service_name="${pod_name}-ssh"
     $run kubectl get service "$ssh_service_name" >& /dev/null
     if [[ "$?" == 0 ]]; then
-        echo "INFO: Stopping ssh loadbalance service $ssh_service_name" >> "$logfile"
+        echo "INFO: Stopping ssh service $ssh_service_name" >> "$logfile"
         $run kubectl delete service "$ssh_service_name" &>> "$logfile"
-        rm "$TMPDIR/hostkeys-${pod_name}"
     fi
 }
 
@@ -121,6 +124,7 @@ remove_persistent_volumes() {
 
 # Find claims of this pod
 claims="$(kubectl get pod "$pod_name" -o json | jq -r '.spec.volumes[] | select((.name == "sciencedata") or .name == "local") | .persistentVolumeClaim.claimName')"
+stop_reverse_proxy 2>&1 >> "$logfile" &
 
 # Now we can delete the pod
 echo "INFO: Deleting pod $pod_name" >> "$logfile"
@@ -128,6 +132,5 @@ $run kubectl delete pod "$pod_name" &>> "$logfile" &
 
 # start slow processes and exit
 remove_persistent_volumes >& /dev/null &
-stop_reverse_proxy >& /dev/null &
 stop_ssh_service >& /dev/null &
 exit 0

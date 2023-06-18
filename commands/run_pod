@@ -9,12 +9,17 @@
 logfile='/var/log/kube.log'
 # If you have more than one public IP, you may need to hardcode EXTERNAL_IP
 EXTERNAL_IP=`hostname -I | sed "s| |\n|g" |  grep -E -v '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1`
-# This presumes you've made an entry for sciencedata in /etc/hosts -if not, just hardcode SCIENCEDATA_IP
+# ScienceData internal IP. This presumes you've made an entry for sciencedata in /etc/hosts -if not, just hardcode SCIENCEDATA_IP
 SCIENCEDATA_IP=`grep -E '\ssciencedata$' /etc/hosts | sed -E 's|^([0-9\.]+)\s.*|\1|'`
+if [ -z "$SCIENCEDATA_IP" ]; then
+	SCIENCEDATA_IP=10.0.0.13
+fi
 # This is the trusted, not for users, internal network
 SCIENCEDATA_INTERNAL_NET=10.0.
 # This is private user network (of the vlan interface)
 SCIENCEDATA_PRIVATE_NET=10.2.
+# Fallback public DNS name for sciencedata server/silo of the user in question (currently used only for the Caddy web page).
+SCIENCEDATA_PUBLIC_IP=sciencedata.dk
 
 cmd="`echo $(readlink -f \"$0\")`"
 DIR="`dirname $cmd`"
@@ -47,7 +52,7 @@ start_reverse_proxy() {
             sed -i "s|PODIP|$pod_ip|" "$caddyfile"
             sed -i "s|PODPORT|$pod_http_port|" "$caddyfile"
             export PATH=/bin/:/usr/bin:/usr/local/bin
-            caddy start --config "$caddyfile" &>> "$logfile" &
+            caddy run --adapter caddyfile --config "$caddyfile" &>> "${caddyfile}.log" &
             kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>/dev/null > ${TMPDIR}/uri-${pod_name}
             break
         fi
@@ -66,16 +71,6 @@ start_reverse_proxy() {
               [[ -s ${TMPDIR}/uri-${pod_name} ]] && break
           done ) >& /dev/null
     fi
-}
-
-copy_hostkeys() {
-    hostkey_file="${TMPDIR}/hostkeys-${pod_name}"
-    ( for i in {1..60}; do
-          sleep 5
-			    kubectl exec --stdin ${pod_name} -- cat /tmp/hostkeys 2>/dev/null > "$hostkey_file"
-			    [[ -e $hostkey_file ]] && [[ ! -s $hostkey_file ]] && rm $hostkey_file
-			    [[ -s $hostkey_file ]] && break
-      done ) >& /dev/null
 }
 
 while getopts "o:s:k:r:l:p:d" flag; do
@@ -222,6 +217,13 @@ if [ -n "$new_pod_name" ] && [ "$new_pod_name" != "$pod_name" ]; then
 	pod_name="$new_pod_name"
 fi
 
+# Check if $owner has a public home server configured, otherwise set to $SCIENCEDATA_PUBLIC_IP
+public_home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=no" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> "$logfile"`
+echo "Home server: $public_home_server" >> "$logfile"
+if [ -z "$public_home_server" ]; then
+	public_home_server=$SCIENCEDATA_PUBLIC_IP
+fi
+
 # Check if home_server is set, otherwise check if $owner has a home server configured, finally to $SCIENCEDATA_IP
 if [ -z $home_server ]; then
 	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> /dev/null`
@@ -303,6 +305,7 @@ if [ -n "$pod_name" ]; then
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SD_UID\") | .value) |= \"$owner\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$FILE\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
+	yq -r "(.spec.containers[]?.env[]? | select(.name == \"PUBLIC_HOME_SERVER\") | .value) |= \"$public_home_server\"" | \
 	sed "s|HOME_SERVER/storage/mathpass|${my_home_server}/storage/mathpass|" | \
 	yq -r -y ".metadata.name=\"$pod_name\"" |\
 	yq -r -y ".metadata.labels.user=\"$user\"" | \
@@ -367,9 +370,6 @@ if [ -n "$pod_name" ]; then
       # begin background processes if required
       if [[ -n "$pod_http_port" ]]; then
           start_reverse_proxy >& /dev/null &
-      fi
-      if [[ -n "$ssh_public_key" ]]; then
-          copy_hostkeys >& /dev/null &
       fi
       exit 0
   else
