@@ -2,17 +2,29 @@
 
 // curl '10.0.0.12/get_containers.php?user_id=fror@dtu.dk'
 
+// We only allow requests from the silos
 if(strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0){
 	header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
 	exit;
 }
 
+$passwordFile = "/root/.get_containers_passwd";
+
+function checkpassword($passwd){
+	global $passwordFile;
+	$pass = trim(file_get_contents($passwordFile));
+	return ($pass===$passwd);
+}
+
 $owner = $_GET['user_id']; // ID of the user logged into ScienceData
+$password = empty($_GET['password'])?'':$_GET['password']; // Only used if user_id is empty
 $fields = $_GET['fields']; // Get just the fields, the data or both fields and data
 
 if(empty($owner)){
-	header($_SERVER['SERVER_PROTOCOL'] . " 401 Unauthorized", true, 401);
-	exit;
+	if(!checkpassword($password)){
+		header($_SERVER['SERVER_PROTOCOL'] . " 401 Unauthorized", true, 401);
+		exit;
+	}
 }
 
 if(empty($fields) || $fields!="include" || $fields!="yes" || $fields!="true"){
