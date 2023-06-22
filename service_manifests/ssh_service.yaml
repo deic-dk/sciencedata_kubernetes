@@ -7,7 +7,12 @@ spec:
   #  - kube.sciencedata.dk
   type: NodePort
   ports:
-  - port: 22 
+    ## This looks like a bug: If port is omitted, Kubernetes complains.
+    ## If set to N, requests to port N (along with the assigned nodepOrt)
+    ## on kube are forwarded
+    ## to the first pod. I.e. if we set it to 22, we can no longer
+    ## ssh to kube. Thus we set it randomly to 6022.
+  - port: 6022 
     # nodePort will be assined by Kubernetes
     targetPort: 22
     name: ssh
