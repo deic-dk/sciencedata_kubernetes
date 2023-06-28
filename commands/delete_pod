@@ -71,33 +71,34 @@ stop_ssh_service() {
 }
 
 check_claim_used() {
-    mount_regex='Mounted By:.*'
-    done_regex='[a-zA-Z]+:.*'
+    mount_regex=Used\ By:\ *
+    done_regex=[a-zA-Z]+:\ *
     mount_start=""
     mount_done=""
     # Parse `kubectl describe pvc` because information about which pods use the claim is not available in the API object json
     # Create array of all pods that use the persistent volume claim
     while read line; do
-        if [[ -n $mount_start && -z $mount_done ]]; then
+        if [[ -n "$mount_start" && -z "$mount_done" ]]; then
             if [[ $line =~ $done_regex ]]; then
                 mount_done="true"
             else
                 pods_with_claim[${#pods_with_claim[@]}]=$line
             fi
         else
-            if [[ -z $mount_start && $line =~ $mount_regex ]]; then
+            if [[ -z "$mount_start" && $line =~ $mount_regex ]]; then
                 mount_start="true"
-                pods_with_claim[0]=$(sed -E 's/Mounted By:\s*//' <<< "$line")
+                pods_with_claim[0]=$(sed -E "s/$mount_regex//" <<< "$line")
             fi
         fi
     done < <(kubectl describe pvc "$1")
-    if [[ ${#pods_with_claim[@]} -gt 1 ]]; then
-        echo "INFO: claim $1 used by more than one pod" >> "$logfile"
+    if [[ ${#pods_with_claim[@]} > 1 ]]; then
+        echo "INFO: claim $1 used by ${#pods_with_claim[@]} pods" >> "$logfile"
         echo "true"
-    elif [[ "${pods_with_claim[0]}" != "$pod_name" && -n "${pods_with_claim[0]}" ]]; then
+    elif [[ -n "${pods_with_claim[0]}" && "${pods_with_claim[0]}" != "$pod_name" ]]; then
         echo "INFO: claim $1 used by other pod ${pods_with_claim[0]}" >> "$logfile"
         echo "true"
     else
+        echo "INFO: claim $1 not used by other pods, ${pods_with_claim[0]} == $pod_name" >> "$logfile"
         echo "false"
     fi
 }
@@ -115,7 +116,7 @@ remove_persistent_volumes() {
         while read claim_name; do
             if [[ $claim_name != "null" && -n $claim_name ]]; then
                 used_by_others=$(check_claim_used "$claim_name")
-                if [[ "$used_by_others" != "true" ]]; then
+                if [[ "$used_by_others" == "false" ]]; then
                     remove_claim_and_volume "$claim_name"
                 fi
             fi
