@@ -81,7 +81,7 @@ file_put_contents($logFile,  "Saved YAML file ".$yaml_url. " to ".$tmpfile_name.
 
 $cmd = '/bin/bash -c set -o pipefail;' . // use bash with pipefail so the error code from run_pod gets propagated
 	' export KUBECONFIG=/etc/kubernetes/admin.conf;' . // use kubernetes config
-	(empty($file) ? '' : ' export FILE=' . $file . ';') .
+	(empty($file) ? '' : ' export FILE="' . $file . '";') .
 	' run_pod ' . 
 	' -o "' . $owner .
 	'" -s "' . $_SERVER['REMOTE_ADDR'] .

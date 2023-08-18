@@ -132,7 +132,7 @@ if [ ! -f "$yaml_file" ]; then
 fi
 
 if [ ! -s "$yaml_file" ]; then
-	echo "ERROR: Input file is empty" >&2
+	echo "ERROR: Input file $yaml_file is empty" >&2
 	exit 1
 fi
 
