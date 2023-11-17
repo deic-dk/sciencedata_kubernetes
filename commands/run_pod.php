@@ -19,8 +19,10 @@ if(empty($_SERVER['REMOTE_ADDR']) || strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0
 
 $owner = $_GET['user_id']; // ID of the user logged into ScienceData and starting the pod
 $storage_path = empty($_GET['storage_path'])?"":$_GET['storage_path']; // Path to mount relative to the URI /storage/
+$cvmfs_repos = empty($_GET['cvmfs_repos'])?"":$_GET['cvmfs_repos']; // Comma-separated list of CVMFS repositories
 $public_key = empty($_GET['public_key'])?"":$_GET['public_key']; // SSH public key of the user
 $file = empty($_GET['file'])?"":$_GET['file']; // File top open inside pod
+$setup_script = empty($_GET['setup_script'])?"":$_GET['setup_script']; // Setup script to run open inside pod
 $yaml_url = $_GET['yaml_url']; // URL of the YAML file to apply - read using the supplied user ID if it starts with
 															// /shared/, /files/, /group/, /sharingin/, /storage/, otherwise read with admin privileges (system/app file).
 
@@ -79,15 +81,50 @@ $tmpfile_name = $metadata['uri'];
 
 file_put_contents($logFile,  "Saved YAML file ".$yaml_url. " to ".$tmpfile_name.":\n".file_get_contents($tmpfile_name)."\n", FILE_APPEND);
 
+// Get CVMFS repos from YAML.
+if(empty($cvmfs_repos)){
+	$arr = yaml_parse($yaml);
+	if(!empty($arr['spec']['containers'])){
+		foreach($arr['spec']['containers'] as $container){
+			if(!empty($container['env'])){
+				foreach($container['env'] as $env){
+					if(!empty($env['name']) && $env['name']=="CVMFS_REPOS" && !empty($env['value'])){
+						$cvmfs_repos = $env['value'];
+						break;
+					}
+				}
+				break;
+			}
+		}
+	}
+}
+
+file_put_contents($logFile,  "CVMFS repos: ".$cvmfs_repos."\n", FILE_APPEND);
+
+$cvmfs_paths = "";
+$cvmfs_mountpoints = "";
+if(!empty($cvmfs_repos)){
+	$cvmfs_repos_arr = explode(',', $cvmfs_repos);
+	$cvmfs_paths_arr = array_map(function($el){return '/cvmfs/'.trim($el);}, $cvmfs_repos_arr);
+	$cvmfs_mountpoints_arr = array_map(function($el){return '/cvmfs/'.trim($el);}, $cvmfs_repos_arr);
+	$cvmfs_paths = implode(',', $cvmfs_paths_arr);
+	$cvmfs_mountpoints = implode(',', $cvmfs_mountpoints_arr);
+}
+
 $cmd = '/bin/bash -c set -o pipefail;' . // use bash with pipefail so the error code from run_pod gets propagated
 	' export KUBECONFIG=/etc/kubernetes/admin.conf;' . // use kubernetes config
 	(empty($file) ? '' : ' export FILE="' . $file . '";') .
+	(empty($setup_script) ? '' : ' export SETUP_SCRIPT="' . $setup_script . '";') .
 	' run_pod ' . 
-	' -o "' . $owner .
-	'" -s "' . $_SERVER['REMOTE_ADDR'] .
-	'" -k "' . $public_key .
-	'" -r "' . $storage_path .
-	'" "' . $tmpfile_name . '" 2>&1 | tee -a ' . $logFile;
+	' -o "' . $owner . '"' .
+	' -s "' . $_SERVER['REMOTE_ADDR'] . '"' .
+	(empty($public_key)?'':(' -k "' . $public_key . '"')) .
+	(empty($storage_path)?'':(' -r "' . $storage_path . '"' )).
+	((empty($cvmfs_paths)||empty($cvmfs_mountpoints))?'':(' -l "' . $cvmfs_paths .
+			'" -m "' . $cvmfs_mountpoints . '"'))  .
+	' "' .$tmpfile_name . '" 2>&1 | tee -a ' . $logFile;
+
+file_put_contents($logFile,  "Running ".$cmd."\n", FILE_APPEND);
 
 exec($cmd, $output, $retval);
 fclose($tmpfile);

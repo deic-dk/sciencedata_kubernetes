@@ -11,6 +11,6 @@ spec:
   accessModes:
     - ReadOnlyMany
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: manual
+  storageClassName: LOCAL_STORAGE_CLASS_NAME # will be configured by run_pod
   hostPath:
-    path: STORAGE_PATH # will be configured by run_pod
+    path: LOCAL_STORAGE_PATH # will be configured by run_pod

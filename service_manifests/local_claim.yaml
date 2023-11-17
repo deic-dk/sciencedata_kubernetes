@@ -3,9 +3,9 @@ apiVersion: v1
 metadata:
   name: LOCAL_CLAIM_NAME # will be configured by run_pod
 spec:
-  storageClassName: manual
+  storageClassName: LOCAL_STORAGE_CLASS_NAME # will be configured by run_pod
   accessModes:
     - ReadOnlyMany
   resources:
     requests:
-      storage: 10Gi 
+      storage: 10Gi

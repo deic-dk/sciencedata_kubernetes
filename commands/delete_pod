@@ -31,7 +31,7 @@ pod_name=${@:$OPTIND:1}
 DIR="$(dirname "$(readlink -f "$0")")"
 
 get_pod_data() {
-    $DIR/get_containers $user 2>&1 | grep "^$pod_name|"
+	$DIR/get_containers $user 2>&1 | grep "^$pod_name|"
 }
 readarray -d '|' -t podInfo < <(get_pod_data)
 
@@ -39,99 +39,101 @@ readarray -d '|' -t podInfo < <(get_pod_data)
 if [ -n "$user" ]; then
 	owner="${podInfo[5]}"
 	if [[ "$owner" != "" && "$owner" != "$user" ]]; then
-		  echo "ERROR: pod $pod_name owned by $owner, NOT $user" | tee -a "$logfile" >&2
+		echo "ERROR: pod $pod_name owned by $owner, NOT $user" | tee -a "$logfile" >&2
 		exit 1
 	fi
 fi
 
 stop_reverse_proxy() {
-    ip="${podInfo[3]}"
-    port="${podInfo[10]}"
-    echo "ip: ${podInfo[3]}" >> "$logfile"
-    echo "owner: ${podInfo[5]}" >> "$logfile"
-    echo "port: ${podInfo[10]}" >> "$logfile"
-    if [[ -n "$ip" ]]; then
-	      pid=`ps auxw | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-${ip}-.*"  | grep -v grep | awk '{print $2}'`
-	      if [[ -n $pid ]]; then
-		        $run kill "$pid"
-		        rm "$TMPDIR/Caddyfile-${ip}-"* >> "$logfile" 2>&1
-		        rm "$TMPDIR/uri-${pod_name}"  >& /dev/null
-            echo "INFO: Stopped caddy proxy $TMPDIR/Caddyfile-${ip}-, $TMPDIR/uri-${pod_name}..." >> "$logfile"
-	      fi
-    fi
+	ip="${podInfo[3]}"
+	port="${podInfo[10]}"
+	echo "ip: ${podInfo[3]}" >> "$logfile"
+	echo "owner: ${podInfo[5]}" >> "$logfile"
+	echo "port: ${podInfo[10]}" >> "$logfile"
+	if [[ -n "$ip" ]]; then
+		pid=`ps auxw | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-${ip}-.*"  | grep -v grep | awk '{print $2}'`
+		if [[ -n $pid ]]; then
+			$run kill "$pid"
+			rm "$TMPDIR/Caddyfile-${ip}-"* >> "$logfile" 2>&1
+			rm "$TMPDIR/uri-${pod_name}"  >& /dev/null
+			echo "INFO: Stopped caddy proxy $TMPDIR/Caddyfile-${ip}-, $TMPDIR/uri-${pod_name}..." >> "$logfile"
+		fi
+	fi
 }
 
 stop_ssh_service() {
-    ssh_service_name="${pod_name}-ssh"
-    $run kubectl get service "$ssh_service_name" >& /dev/null
-    if [[ "$?" == 0 ]]; then
-        echo "INFO: Stopping ssh service $ssh_service_name" >> "$logfile"
-        $run kubectl delete service "$ssh_service_name" &>> "$logfile"
-    fi
+	ssh_service_name="${pod_name}-ssh"
+	$run kubectl get service "$ssh_service_name" >& /dev/null
+	if [[ "$?" == 0 ]]; then
+		echo "INFO: Stopping ssh service $ssh_service_name" >> "$logfile"
+		$run kubectl delete service "$ssh_service_name" &>> "$logfile"
+	fi
 }
 
 check_claim_used() {
-    mount_regex=Used\ By:\ *
-    done_regex=[a-zA-Z]+:\ *
-    mount_start=""
-    mount_done=""
-    # Parse `kubectl describe pvc` because information about which pods use the claim is not available in the API object json
-    # Create array of all pods that use the persistent volume claim
-    while read line; do
-        if [[ -n "$mount_start" && -z "$mount_done" ]]; then
-            if [[ $line =~ $done_regex ]]; then
-                mount_done="true"
-            else
-                pods_with_claim[${#pods_with_claim[@]}]=$line
-            fi
-        else
-            if [[ -z "$mount_start" && $line =~ $mount_regex ]]; then
-                mount_start="true"
-                pods_with_claim[0]=$(sed -E "s/$mount_regex//" <<< "$line")
-            fi
-        fi
-    done < <(kubectl describe pvc "$1")
-    if [[ ${#pods_with_claim[@]} > 1 ]]; then
-        echo "INFO: claim $1 used by ${#pods_with_claim[@]} pods" >> "$logfile"
-        echo "true"
-    elif [[ -n "${pods_with_claim[0]}" && "${pods_with_claim[0]}" != "$pod_name" ]]; then
-        echo "INFO: claim $1 used by other pod ${pods_with_claim[0]}" >> "$logfile"
-        echo "true"
-    else
-        echo "INFO: claim $1 not used by other pods, ${pods_with_claim[0]} == $pod_name" >> "$logfile"
-        echo "false"
-    fi
+	mount_regex=Used\ By:\ *
+	done_regex=[a-zA-Z]+:\ *
+	mount_start=""
+	mount_done=""
+	# Parse `kubectl describe pvc` because information about which pods use the claim is not available in the API object json
+	# Create array of all pods that use the persistent volume claim
+	while read line; do
+		if [[ -n "$mount_start" && -z "$mount_done" ]]; then
+			if [[ $line =~ $done_regex ]]; then
+				mount_done="true"
+			else
+				pods_with_claim[${#pods_with_claim[@]}]=$line
+			fi
+		else
+			if [[ -z "$mount_start" && $line =~ $mount_regex ]]; then
+				mount_start="true"
+				pods_with_claim[0]=$(sed -E "s/$mount_regex//" <<< "$line")
+			fi
+		fi
+	done < <(kubectl describe pvc "$1")
+	if [[ ${#pods_with_claim[@]} > 1 ]]; then
+		echo "INFO: claim $1 used by ${#pods_with_claim[@]} pods" >> "$logfile"
+		echo "true"
+	elif [[ -n "${pods_with_claim[0]}" && "${pods_with_claim[0]}" != "$pod_name" && "${pods_with_claim[0]}" != '<none>' ]]; then
+		echo "INFO: claim $1 used by other pod ${pods_with_claim[0]}" >> "$logfile"
+		echo "true"
+	else
+		echo "INFO: claim $1 not used by other pods, ${pods_with_claim[0]} == $pod_name" >> "$logfile"
+		echo "false"
+	fi
 }
 
 remove_claim_and_volume() {
-    #each volume can only be bound to one claim, so this should be safe
-		volume_name=$(kubectl get persistentvolumeclaim "$claim_name" -o json | jq -r ".spec.volumeName")
-    echo "INFO: deleting PVC $claim_name and PV $volume_name" >> "$logfile"
-    $run kubectl delete pvc "$claim_name" &>> "$logfile"
-    $run kubectl delete pv "$volume_name" &>> "$logfile"
+	#each volume can only be bound to one claim, so this should be safe
+	claim_name="$1"
+	volume_name=$(kubectl get persistentvolumeclaim "$claim_name" -o json | jq -r ".spec.volumeName")
+	echo "INFO: deleting PVC $claim_name and PV $volume_name" >> "$logfile"
+	$run kubectl delete pvc "$claim_name" &>> "$logfile"
+	$run kubectl delete pv "$volume_name" &>> "$logfile"
 }
 
 remove_persistent_volumes() {
-    echo "$claims" |\
-        while read claim_name; do
-            if [[ $claim_name != "null" && -n $claim_name ]]; then
-                used_by_others=$(check_claim_used "$claim_name")
-                if [[ "$used_by_others" == "false" ]]; then
-                    remove_claim_and_volume "$claim_name"
-                fi
-            fi
-        done
+	kubectl get pod "$pod_name" -o json | jq -r '.spec.volumes[] | select((.name == "sciencedata") or (.name | startswith("local--"))) | .persistentVolumeClaim.claimName' |\
+	while read claim_name; do
+		if [[ "$claim_name" != "null" && -n "$claim_name" ]]; then
+			used_by_others=$(check_claim_used "$claim_name")
+			if [[ "$used_by_others" == "false" ]]; then
+				remove_claim_and_volume "$claim_name"
+			fi
+		fi
+	done
 }
 
-# Find claims of this pod
-claims="$(kubectl get pod "$pod_name" -o json | jq -r '.spec.volumes[] | select((.name == "sciencedata") or .name == "local") | .persistentVolumeClaim.claimName')"
-stop_reverse_proxy 2>&1 >> "$logfile" &
+stop_reverse_proxy &>> "$logfile" &
+
+# start slow process
+remove_persistent_volumes &>> "$logfile" &
 
 # Now we can delete the pod
 echo "INFO: Deleting pod $pod_name" >> "$logfile"
 $run kubectl delete pod "$pod_name" &>> "$logfile" &
 
-# start slow processes and exit
-remove_persistent_volumes >& /dev/null &
-stop_ssh_service >& /dev/null &
+# start slow process
+stop_ssh_service &>> "$logfile" &
+
 exit 0

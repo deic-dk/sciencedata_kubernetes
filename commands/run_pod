@@ -40,40 +40,40 @@ dryrun=
 
 #### Define slow functions to run in background after successful pod creation
 start_reverse_proxy() {
-    # Wait for one minute for pod to start
-    for i in {1..6}; do
-        # Find local IP
-        pod_ip=$(kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||')
-        if [[ -n "$pod_ip" ]]; then
-            rm ${TMPDIR}/uri-${pod_name} 2>&1 >> "$logfile"
-            echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >> "$logfile"
-            caddyfile="$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}-${pod_name}"
-            sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$caddyfile"
-            sed -i "s|PODIP|$pod_ip|" "$caddyfile"
-            sed -i "s|PODPORT|$pod_http_port|" "$caddyfile"
-            export PATH=/bin/:/usr/bin:/usr/local/bin
-            caddy run --adapter caddyfile --config "$caddyfile" &>> "${caddyfile}.log" &
-            kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>>"$logfile" > ${TMPDIR}/uri-${pod_name}
-            break
-        fi
-        sleep 10
-    done
-    if [[ -z "$pod_ip" ]]; then
-        echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}." >> "$logfile"
-        exit 1
-    else
-        # Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
-        ( for i in {1..60}; do
-              # If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
-              sleep 5
-              kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>>"$logfile" > ${TMPDIR}/uri-${pod_name}
-              [[ -e ${TMPDIR}/uri-${pod_name} ]] && [[ ! -s ${TMPDIR}/uri-${pod_name} ]] && rm ${TMPDIR}/uri-${pod_name}
-              [[ -s ${TMPDIR}/uri-${pod_name} ]] && break
-          done ) 2>&1 >> "$logfile"
-    fi
+	# Wait for two minutes for pod to start
+	for i in {1..12}; do
+		# Find local IP
+		pod_ip=$(kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||')
+		if [[ -n "$pod_ip" ]]; then
+			rm ${TMPDIR}/uri-${pod_name} 2>&1 >> "$logfile"
+			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >> "$logfile"
+			caddyfile="$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}-${pod_name}"
+			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$caddyfile"
+			sed -i "s|PODIP|$pod_ip|" "$caddyfile"
+			sed -i "s|PODPORT|$pod_http_port|" "$caddyfile"
+			export PATH=/bin/:/usr/bin:/usr/local/bin
+			caddy run --adapter caddyfile --config "$caddyfile" &>> "${caddyfile}.log" &
+			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>>"$logfile" > ${TMPDIR}/uri-${pod_name}
+			break
+		fi
+		sleep 10
+	done
+	if [[ -z "$pod_ip" ]]; then
+		echo "ERROR: pod $pod_name did not start. NOT running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}." >> "$logfile"
+		exit 1
+	else
+		# Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
+		( for i in {1..60}; do
+			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
+				sleep 5
+				kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>>"$logfile" > ${TMPDIR}/uri-${pod_name}
+				[[ -e ${TMPDIR}/uri-${pod_name} ]] && [[ ! -s ${TMPDIR}/uri-${pod_name} ]] && rm ${TMPDIR}/uri-${pod_name}
+				[[ -s ${TMPDIR}/uri-${pod_name} ]] && break
+			done ) 2>&1 >> "$logfile"
+	fi
 }
 
-while getopts "o:s:k:r:l:p:d" flag; do
+while getopts "o:s:k:r:l:m:p:d" flag; do
 	case "$flag" in
 		o)
 			# ScienceData userid who will own the pod
@@ -95,8 +95,16 @@ while getopts "o:s:k:r:l:p:d" flag; do
 			;;
 		l)
 			# Path on local server to be claimed - absolute.
-			# Notice that the mountpoint is specified in the pod yaml
+			# Notice that the mountPath is specified in the pod yaml under name "local"
+			# Can be a comma-separated list of paths, but then local_storage_mountpath
+			# must be given as well.
 			local_storage_path=$OPTARG
+			;;
+		m)
+			# Mountpoint(s) inside the pod/container for local_storage_path.
+			# If local_storage_path is just a single path, the mountPath
+			# can be specified in the yaml under volumeMounts with name "local"
+			local_storage_mountpath=$OPTARG
 			;;
 		p)
 			# Port of web server running in the pod, i.e.
@@ -178,8 +186,17 @@ if [ -z "$local_storage_path" ]; then
 	# No local storage path given on stdin, try getting it from env
 	local_storage_path="$LOCAL_STORAGE_PATH"
 	if [ -z "$local_storage_path" ]; then
-		# Try getting local storage path from yaml
+		# Try getting local storage path from yaml- this means no comma-separated multivalue
 		local_storage_path="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"MOUNT_SRC\") | .value'`"
+	fi
+fi
+
+if [ -z "$local_storage_mountpath" ]; then
+	# No local storage path given on stdin, try getting it from env
+	local_storage_mountpath="$LOCAL_STORAGE_MOUNTPATH"
+	if [ -z "$local_storage_mountpath" ]; then
+		# Try getting local storage mountpath from yaml - this means no comma-separated multivalue
+		local_storage_mountpath="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"MOUNT_DEST\") | .value'`"
 	fi
 fi
 
@@ -218,7 +235,7 @@ if [ -n "$new_pod_name" ] && [ "$new_pod_name" != "$pod_name" ]; then
 fi
 
 # Check if $owner has a public home server configured, otherwise set to $SCIENCEDATA_PUBLIC_IP
-public_home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=no" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> "$logfile"`
+public_home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=no" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2>> "$logfile"`
 echo "Home server: $public_home_server" >> "$logfile"
 if [ -z "$public_home_server" ]; then
 	public_home_server=$SCIENCEDATA_PUBLIC_IP
@@ -240,16 +257,16 @@ if [ -n "$nfs_storage_path" ]; then
 	if [ "$dir_exists_http_code" != "207" ] && [ -z "$dryrun" ]; then
 		echo "INFO: https://${home_server}/storage/${nfs_storage_path}/ does NOT exist" >> "$logfile"
 		dir_create_http_code=$(curl --insecure -X MKCOL -o /dev/null -w "%{http_code}" -u ${owner}: \
-                                "https://${home_server}/storage/${nfs_storage_path}/" 2> /dev/null)
-    if [[ $dir_create_http_code != 201 ]]; then
-      echo "WARNING: Failed to create storage directory" >> "$logfile"
-    fi
+								"https://${home_server}/storage/${nfs_storage_path}/" 2> /dev/null)
+		if [[ $dir_create_http_code != 201 ]]; then
+			echo "WARNING: Failed to create storage directory" >> "$logfile"
+		fi
 	fi
-  nfs_volume_name="nfs-${home_server}-${owner_str}-$(sed 's|/|-|g' <<< "${nfs_storage_path}")"
-  nfs_claim_name=$nfs_volume_name # just use the same name
+	nfs_volume_name="nfs-${home_server}-${owner_str}-$(sed 's|[/\. ]|-|g' <<< ${nfs_storage_path})"
+	nfs_claim_name=$nfs_volume_name # just use the same name
 	if [ $home_server ]; then
 		# Check if the volume is already mounted
-		kubectl get persistentvolume | grep "^${nfs_volume_name} " >& /dev/null
+		kubectl get pv | grep "^${nfs_volume_name} " >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_volume="yes"
 		else
@@ -259,7 +276,7 @@ if [ -n "$nfs_storage_path" ]; then
 			fi
 		fi
 		# Check if a claim has already been made on $nfs_storage_path
-		kubectl get persistentvolumeclaim | grep  "^${nfs_claim_name} " >& /dev/null
+		kubectl get pvc | grep  "^${nfs_claim_name} " >& /dev/null
 		if [ "$?" -ne "0" ]; then
 			create_nfs_claim="yes"
 		fi
@@ -267,19 +284,30 @@ if [ -n "$nfs_storage_path" ]; then
 fi
 
 if [ -n "$local_storage_path" ]; then
-	local_storage_name=`echo $local_storage_path | sed 's|/|-|g'`
-	# Check if directory exists
-	if [ -d "$local_storage_path" ]; then
-		kubectl get persistentvolume | grep "local-${local_storage_name}" >& /dev/null
+	while read lsp; do
+		local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g'`
+		# Check if directory exists - TODO: perhaps drop this - the directory only needs to exist on the workers
+		#if [ -d "$lsp" ]; then
+			kubectl get pv | grep "local-${local_storage_name}" >& /dev/null
+			if [ "$?" -ne "0" ]; then
+				echo "Will create volume $lsp" >> "$logfile"
+				if [ -z "$create_local_volume" ]; then
+					create_local_volume="$lsp"
+				else
+					create_local_volume="$create_local_volume,$lsp"
+				fi
+			fi
+		#fi
+		# Check if a claim has already been made on $lsp
+		kubectl get pvc | grep  "local-claim-${local_storage_name}" >& /dev/null
 		if [ "$?" -ne "0" ]; then
-			create_local_volume="yes"
+			if [ -z "$create_local_claim" ]; then
+				create_local_claim="$lsp"
+			else
+				create_local_claim="$create_local_claim,$lsp"
+			fi
 		fi
-	fi
-	# Check if a claim has already been made on $local_storage_path
-	kubectl get PersistentVolumeClaim | grep  "local-claim-${local_storage_name}" >& /dev/null
-	if [ "$?" -ne "0" ]; then
-		create_local_claim="yes"
-	fi
+	done <<< $(echo "$local_storage_path" | sed "s|,|\n|g")
 fi
 
 # Find free port for Caddy proxy in range 2000-3000 iff there is a port to forward to
@@ -297,13 +325,28 @@ if [ $home_server ]; then
 	export my_home_server=`echo $home_server | sed "s|^$SCIENCEDATA_INTERNAL_NET|$SCIENCEDATA_PRIVATE_NET|"`
 fi
 
-cat $yaml_file |\
 if [ -n "$pod_name" ]; then
+
+	modified_yaml=$( cat $yaml_file )
+	
+	# Deal with local mounts (/usr/local/software and CVMFS repositories)
+	if [ -n "$local_storage_mountpath" ]; then
+		while read lsp; do
+			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g'`
+			# pop off the first element
+			lsm=`echo $local_storage_mountpath | sed -E 's|^([^,]+),(.*)|\1|'`
+			local_storage_mountpath=`echo $local_storage_mountpath | sed -E 's|^([^,]+),||'`
+			echo "Adding volume $lsm to $modified_yaml" >> "$logfile"
+			modified_yaml=$( ( yq -r -y ".spec.volumes|= .+ [{\"name\": \"local-${local_storage_name}\", \"persistentVolumeClaim\": {\"claimName\": \"local-claim-${local_storage_name}\"}}]" | yq -r -y ".spec.containers[].volumeMounts|= .+ [{\"name\": \"local-${local_storage_name}\", \"mountPath\":\"$lsm\"}]" ) <<< "$modified_yaml" )
+		done <<< $(echo "$local_storage_path" | sed "s|,|\n|g")
+	fi
+
 	### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
-  modified_yaml=$( cat $yaml_file | \
+  modified_yaml=$( echo "$modified_yaml" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SD_UID\") | .value) |= \"$owner\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$FILE\"" | \
+	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SETUP_SCRIPT\") | .value) |= \"$SETUP_SCRIPT\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"PUBLIC_HOME_SERVER\") | .value) |= \"$public_home_server\"" | \
 	sed "s|HOME_SERVER/storage/mathpass|${my_home_server}/storage/mathpass|" | \
@@ -312,8 +355,8 @@ if [ -n "$pod_name" ]; then
 	yq -r -y ".metadata.labels.domain=\"$domain\"" |\
 	yq -r -y ".metadata.labels.app=\"$pod_name\"" | \
 	( [ -z "$pod_http_port" ] && cat || yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" ) |\
-	( [ -z "$nfs_storage_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]") |\
-	( [ -z "$local_storage_name" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"local\", \"persistentVolumeClaim\": {\"claimName\": \"local-claim-${local_storage_name}\"}}]")
+	( [ -z "$nfs_storage_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]" )
+
 	### SSH service
 	if [ -n "$ssh_public_key" ]; then
 		echo "---"
@@ -337,45 +380,55 @@ if [ -n "$pod_name" ]; then
 			sed "s|NFS_CLAIM_NAME|${nfs_claim_name}|g"
 		fi
 	fi
-	if [ -n "$local_storage_name" ]; then
-		### Local volume
-		if [ -n "$create_local_volume" ]; then
+	### Local volume
+	echo "Creating volumes $create_local_volume" >> "$logfile"
+	if [ -n "$create_local_volume" ]; then
+		while read lsp; do
+			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g'`
 			echo "---"
 			cat "$LOCAl_VOLUME_YAML_FILE" | \
 			sed "s|LOCAL_VOLUME_NAME|local-${local_storage_name}|g" | \
-			sed "s|STORAGE_PATH|${local_storage_path}|g"
-		fi
-		### Local persistent volume claim
-		if [ -n "$create_local_claim" ]; then
+			sed "s|LOCAL_STORAGE_PATH|${lsp}|g" | \
+			sed "s|LOCAL_STORAGE_CLASS_NAME|manual-${local_storage_name}|g"
+		done <<< $(echo "$create_local_volume" | sed "s|,|\n|g")
+	fi
+	echo "Creating volumeclaims $create_local_claim" >> "$logfile"
+	### Local persistent volume claim
+	if [ -n "$create_local_claim" ]; then
+		while read lsp; do
+			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g'`
 			echo "---"
 			cat "$LOCAL_CLAIM_YAML_FILE" | \
-			sed "s|LOCAL_CLAIM_NAME|local-claim-${local_storage_name}|g"
-		fi
+			sed "s|LOCAL_CLAIM_NAME|local-claim-${local_storage_name}|g" | \
+			sed "s|LOCAL_STORAGE_CLASS_NAME|manual-${local_storage_name}|g"
+		done <<< $(echo "$create_local_claim" | sed "s|,|\n|g")
 	fi
-	)
 
-  echo "$modified_yaml" >> "$logfile"
-  # Now apply the yaml and save the output of the kubectl command
-  if [[ -z "$dryrun" ]]; then
-      kubectl_output=$( kubectl apply -f - < <(echo "$modified_yaml") )
-  else
-      kubectl_output=$( kubectl apply --validate=true --dry-run=client -f - < <(echo "$modified_yaml") )
-  fi
+ )
 
-  echo "$kubectl_output" >> "$logfile"
-  # If it worked, there should be a line in the output like 'pod/jupyter... created'. In that case report success
-  regex='.*^pod/[^'$'\n'']+created$.*'
-  if [[ $kubectl_output =~ $regex ]]; then
-      echo "SUCCESS: $pod_name"
-      # begin background processes if required
-      if [[ -n "$pod_http_port" ]]; then
-          start_reverse_proxy >& /dev/null &
-      fi
-      exit 0
-  else
-      echo "FAILURE: kubectl did not create pod"
-      exit 1
-  fi
+	echo "YAML now: $modified_yaml" >> "$logfile"
+	
+	# Now apply the yaml and save the output of the kubectl command
+	if [[ -z "$dryrun" ]]; then
+		kubectl_output=$( kubectl apply -f - < <(echo "$modified_yaml") )
+	else
+		kubectl_output=$( kubectl apply --validate=true --dry-run=client -f - < <(echo "$modified_yaml") )
+	fi
+
+	echo "$kubectl_output" >> "$logfile"
+	# If it worked, there should be a line in the output like 'pod/jupyter... created'. In that case report success
+	regex='.*^pod/[^'$'\n'']+created$.*'
+	if [[ $kubectl_output =~ $regex ]]; then
+		echo "SUCCESS: $pod_name"
+		# begin background processes if required
+		if [[ -n "$pod_http_port" ]]; then
+			start_reverse_proxy >& /dev/null &
+		fi
+		exit 0
+	else
+		echo "FAILURE: kubectl did not create pod"
+		exit 1
+	fi
 else
 	echo "ERROR: Parsing .metadata.name from YAML failed" >&2
 	exit 2
