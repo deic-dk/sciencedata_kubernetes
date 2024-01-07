@@ -12,11 +12,15 @@ owner="$@"
 user=`echo $owner | awk -F@ '{print $1}'`
 domain=`echo $owner | awk -F@ '{print $2}'`
 
-if [[ -n $owner ]]; then
-    labels="user=$user,domain=$domain"
+if [[ -n "$owner" ]]; then
+    if [[ -z "$domain" ]]; then
+        labels="-l user=$user"
+    else
+        labels="-l user=$user,domain=$domain"
+    fi
 fi
 
-echo $(kubectl get pods ${labels:+-l "$labels"} -o json) |\
+echo $(kubectl get pods ${labels:+"$labels"} -o json) |\
     jq -r '.items[] | {name: .metadata.name, '\
 'cname: [.spec.containers[].name][0]?, '\
 'image: [.spec.containers[].image][0]?, '\
