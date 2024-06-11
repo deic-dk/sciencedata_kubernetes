@@ -22,6 +22,7 @@ $storage_path = empty($_GET['storage_path'])?"":$_GET['storage_path']; // Path t
 $cvmfs_repos = empty($_GET['cvmfs_repos'])?"":$_GET['cvmfs_repos']; // Comma-separated list of CVMFS repositories
 $public_key = empty($_GET['public_key'])?"":$_GET['public_key']; // SSH public key of the user
 $file = empty($_GET['file'])?"":$_GET['file']; // File top open inside pod
+$peers = empty($_GET['peers'])?"":$_GET['peers']; // Pod peers of the form host1:ip1,host2:ip2,...
 $setup_script = empty($_GET['setup_script'])?"":$_GET['setup_script']; // Setup script to run open inside pod
 $yaml_url = $_GET['yaml_url']; // URL of the YAML file to apply - read using the supplied user ID if it starts with
 															// /shared/, /files/, /group/, /sharingin/, /storage/, otherwise read with admin privileges (system/app file).
@@ -114,6 +115,7 @@ if(!empty($cvmfs_repos)){
 $cmd = '/bin/bash -c set -o pipefail;' . // use bash with pipefail so the error code from run_pod gets propagated
 	' export KUBECONFIG=/etc/kubernetes/admin.conf;' . // use kubernetes config
 	(empty($file) ? '' : ' export FILE="' . $file . '";') .
+	(empty($peers) ? '' : ' export PEERS="' . $peers . '";') .
 	(empty($setup_script) ? '' : ' export SETUP_SCRIPT="' . $setup_script . '";') .
 	' run_pod ' . 
 	' -o "' . $owner . '"' .

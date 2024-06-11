@@ -346,6 +346,7 @@ if [ -n "$pod_name" ]; then
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SD_UID\") | .value) |= \"$owner\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$FILE\"" | \
+  yq -r "(.spec.containers[]?.env[]? | select(.name == \"PEERS\") | .value) |= \"$PEERS\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SETUP_SCRIPT\") | .value) |= \"$SETUP_SCRIPT\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"PUBLIC_HOME_SERVER\") | .value) |= \"$public_home_server\"" | \
