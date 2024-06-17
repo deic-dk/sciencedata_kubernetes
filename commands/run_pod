@@ -14,6 +14,24 @@ SCIENCEDATA_IP=`grep -E '\ssciencedata$' /etc/hosts | sed -E 's|^([0-9\.]+)\s.*|
 if [ -z "$SCIENCEDATA_IP" ]; then
 	SCIENCEDATA_IP=10.0.0.13
 fi
+
+# If $PEERS is set and contains an unqualified host entry with no IP, check if the host is in /etc/hosts and fill in if it is.
+if [ -n $PEERS ]; then
+  PEERS_NAMES=`echo $PEERS | sed -E 's| *, *| |g' | sed -E 's| *: *([0-9.]+)|:\1|g' | sed -E 's|:[^ ]*||g'`
+  PEERS_IPS=`echo $PEERS | sed -E 's| *, *| |g' | sed -E 's| *: *([0-9.]+)|:\1|g' | sed -E 's|: |:- |g' | sed -E 's|[^ ]+:||g'`
+  mypeers=`echo $PEERS | sed 's|,| |g'`
+  for mypeer in $mypeers; do
+    echo $mypeer | grep -v '\.' | grep -E ':$' >& /dev/null
+    if [ "$?" == "0" ]; then
+      name=`echo $mypeer | sed 's|:.*||'`
+      myip=`grep -E "\s$name$" /etc/hosts | sed -E 's|([\\.0-9]+)\s*(.*)\s*|\1|g'`
+      if [[ "$myip" != "" ]]; then
+        PEERS=`echo $PEERS | sed -E "s|$name *: *|$name:$myip|"`
+      fi
+    fi
+  done
+fi
+
 # This is the trusted, not for users, internal network
 SCIENCEDATA_INTERNAL_NET=10.0.
 # This is private user network (of the vlan interface)
