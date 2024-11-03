@@ -15,6 +15,7 @@ spec:
     - nfsvers=4.1
     - noatime
     - nodiratime
+    - async
   nfs:
     path: /tank/storage/STORAGE_PATH # will be configured by run_pod
     server: SERVER_IP # will be configured by run_pod.sh
