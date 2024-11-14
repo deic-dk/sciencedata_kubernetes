@@ -367,6 +367,7 @@ if [ -n "$pod_name" ]; then
   yq -r "(.spec.containers[]?.env[]? | select(.name == \"PEERS\") | .value) |= \"$PEERS\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SETUP_SCRIPT\") | .value) |= \"$SETUP_SCRIPT\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
+  yq -r "(.spec.containers[]?.env[]? | select(.name == \"HTTPS_PORT\") | .value) |= \"$reverse_proxy_port\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"PUBLIC_HOME_SERVER\") | .value) |= \"$public_home_server\"" | \
 	sed "s|HOME_SERVER/storage/mathpass|${my_home_server}/storage/mathpass|" | \
 	yq -r -y ".metadata.name=\"$pod_name\"" |\
