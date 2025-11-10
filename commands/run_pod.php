@@ -10,7 +10,7 @@ if(!empty($argv[1])){
 
 file_put_contents($logFile,  "GET: ".serialize($_GET). "\n", FILE_APPEND);
 
-// curl '10.0.0.12/run_pod.php?user_id=fror@dtu.dk&storage_path=www&public_key=ssh-rsa%20AAAAB3NzaC1yc2EAAAABIwAAAIEA1lUNAcCuUvl2nxu0ILt0zfdESUmOGlktcDbv8ufRcJ6A1oYDksn%2BFHxxWU3X7laD7dfF9BBkLr5nC3M7ZuuoW1j2QcHcdFRSfTSLuSYM%2FebHdR5g65gGJWrc8qCaFEWS2unLz6rbCqtKBscQDsLtosIXx1brOmWFATWm%2FuCvABc%3D%20frederik%40pcitapi34&yaml_uri=/files/tmp/ubuntu_sciencedata.yaml'
+// curl '10.0.0.12/run_pod.php?user_id=fror@dtu.dk&mount_path=www&public_key=ssh-rsa%20AAAAB3NzaC1yc2EAAAABIwAAAIEA1lUNAcCuUvl2nxu0ILt0zfdESUmOGlktcDbv8ufRcJ6A1oYDksn%2BFHxxWU3X7laD7dfF9BBkLr5nC3M7ZuuoW1j2QcHcdFRSfTSLuSYM%2FebHdR5g65gGJWrc8qCaFEWS2unLz6rbCqtKBscQDsLtosIXx1brOmWFATWm%2FuCvABc%3D%20frederik%40pcitapi34&yaml_uri=/files/tmp/ubuntu_sciencedata.yaml'
 
 if(empty($_SERVER['REMOTE_ADDR']) || strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0){
 	empty($_SERVER['SERVER_PROTOCOL'])?"":header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
@@ -18,7 +18,8 @@ if(empty($_SERVER['REMOTE_ADDR']) || strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0
 }
 
 $owner = $_GET['user_id']; // ID of the user logged into ScienceData and starting the pod
-$storage_path = empty($_GET['storage_path'])?"":$_GET['storage_path']; // Path to mount relative to the URI /storage/
+$mount_path = empty($_GET['mount_path'])?"":$_GET['mount_path']; // Path to mount relative to the URI /storage/ or /files/
+$mount_root = empty($_GET['mount_root'])?"":$_GET['mount_root']; // /tank/storage or /tankfiles
 $cvmfs_repos = empty($_GET['cvmfs_repos'])?"":$_GET['cvmfs_repos']; // Comma-separated list of CVMFS repositories
 $public_key = empty($_GET['public_key'])?"":$_GET['public_key']; // SSH public key of the user
 $file = empty($_GET['file'])?"":$_GET['file']; // File top open inside pod
@@ -121,7 +122,8 @@ $cmd = '/bin/bash -c set -o pipefail;' . // use bash with pipefail so the error 
 	' -o "' . $owner . '"' .
 	' -s "' . $_SERVER['REMOTE_ADDR'] . '"' .
 	(empty($public_key)?'':(' -k "' . $public_key . '"')) .
-	(empty($storage_path)?'':(' -r "' . $storage_path . '"' )).
+	(!empty($mount_root)&&$mount_root=='storage'&&!empty($mount_path)?(' -r "' . $mount_path . '"' ):'').
+	(!empty($mount_root)&&$mount_root=='files'&&!empty($mount_path)?(' -f "' . $mount_path . '"' ):'').
 	((empty($cvmfs_paths)||empty($cvmfs_mountpoints))?'':(' -l "' . $cvmfs_paths .
 			'" -m "' . $cvmfs_mountpoints . '"'))  .
 	' "' .$tmpfile_name . '" 2>&1 | tee -a ' . $logFile;

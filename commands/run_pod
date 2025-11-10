@@ -54,6 +54,7 @@ yaml_file=""
 owner=""
 ssh_public_key=""
 nfs_storage_path=""
+nfs_files_path=""
 dryrun=
 
 #### Define slow functions to run in background after successful pod creation
@@ -91,7 +92,7 @@ start_reverse_proxy() {
 	fi
 }
 
-while getopts "o:s:k:r:l:m:p:d" flag; do
+while getopts "o:s:k:r:f:l:m:p:d" flag; do
 	case "$flag" in
 		o)
 			# ScienceData userid who will own the pod
@@ -108,8 +109,15 @@ while getopts "o:s:k:r:l:m:p:d" flag; do
 			;;
 		r)
 			# Path on home server to be claimed, relative to /tank/storage/owner/
+			# Only one of nfs_storage_path and nfs_files_path should be specified.
 			# Notice that the mountpoint is specified in the pod yaml
 			nfs_storage_path=$OPTARG
+			;;
+		f)
+			# Path on home server to be claimed, relative to /tank/data/owncloud/owner/files/
+			# Only one of nfs_storage_path and nfs_files_path should be specified.
+			# Notice that the mountpoint is specified in the pod yaml
+			nfs_files_path=$OPTARG
 			;;
 		l)
 			# Path on local server to be claimed - absolute.
@@ -160,6 +168,11 @@ fi
 if [ ! -s "$yaml_file" ]; then
 	echo "ERROR: Input file $yaml_file is empty" >&2
 	exit 1
+fi
+
+if [ -n "$nfs_files_path" -a -n "$nfs_storage_path" ]; then
+	echo "ERROR: Only one of -f and -r may be specified"  >&2
+	exit -1
 fi
 
 if [ -z "$owner" ]; then
@@ -264,23 +277,38 @@ if [ -z $home_server ]; then
 	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> /dev/null`
 fi
 
-if [ -n "$nfs_storage_path" ]; then
+if [[ -n "$nfs_storage_path" || -n "$nfs_files_path" ]]; then
+	web_prefix="files"
+	prefix="tank/data/owncloud"
+	nfs_path=$nfs_files_path
+	suffix="files/"
+	nfs_access="ro"
+	nfs_access_mode="ReadOnlyMany"
+	if [[ -n "$nfs_storage_path" ]]; then
+		web_prefix="storage"
+		prefix="tank/storage"
+			nfs_path=$nfs_storage_path
+		suffix=""
+		nfs_access="rw"
+		nfs_access_mode="ReadWriteMany"
+	fi
 	if [ -z $home_server ]; then
 		home_server=$SCIENCEDATA_IP
 	fi
 	# Check if directory exists
 	dir_exists_http_code=`curl --insecure -H "Depth: 0" -X PROPFIND -o /dev/null -w "%{http_code}" \
-	-u ${owner}: "https://${home_server}/storage/${nfs_storage_path}/" 2> /dev/null`
+	-u ${owner}: "https://${home_server}/${web_prefix}/${nfs_storage_path}/" 2> /dev/null`
 	# Create if not
 	if [ "$dir_exists_http_code" != "207" ] && [ -z "$dryrun" ]; then
-		echo "INFO: https://${home_server}/storage/${nfs_storage_path}/ does NOT exist" >> "$logfile"
+		echo "INFO: https://${home_server}/${web_prefix}/${nfs_storage_path}/ does NOT exist" >> "$logfile"
 		dir_create_http_code=$(curl --insecure -X MKCOL -o /dev/null -w "%{http_code}" -u ${owner}: \
-								"https://${home_server}/storage/${nfs_storage_path}/" 2> /dev/null)
+								"https://${home_server}/${web_prefix}/${nfs_storage_path}/" 2> /dev/null)
 		if [[ $dir_create_http_code != 201 ]]; then
 			echo "WARNING: Failed to create storage directory" >> "$logfile"
 		fi
 	fi
-	nfs_volume_name="nfs-${home_server}-${owner_str}-$(sed 's|[/\. ]|-|g' <<< ${nfs_storage_path})"
+	nfs_volume_path=/${prefix}/${owner}/${suffix}${nfs_path}
+	nfs_volume_name="nfs-${home_server}-${owner_str}-$(sed 's|[/\. ]|-|g' <<< ${prefix})-$(sed 's|[/\. ]|-|g' <<< ${nfs_path})"
 	nfs_claim_name=$nfs_volume_name # just use the same name
 	if [ $home_server ]; then
 		# Check if the volume is already mounted
@@ -288,7 +316,7 @@ if [ -n "$nfs_storage_path" ]; then
 		if [ "$?" -ne "0" ]; then
 			create_nfs_volume="yes"
 		else
-			kubectl get pv -o yaml | yq '.items[] | (.spec.nfs.server+":"+.spec.nfs.path)' | grep "${home_server}:/tank/storage/${owner_str}/${nfs_storage_path}" >& /dev/null
+			kubectl get pv -o yaml | yq '.items[] | (.spec.nfs.server+":"+.spec.nfs.path)' | grep "${home_server}:${nfs_volume_path}" >& /dev/null
 			if [ "$?" -ne "0" ]; then
 				create_nfs_volume="yes"
 			fi
@@ -375,7 +403,7 @@ if [ -n "$pod_name" ]; then
 	yq -r -y ".metadata.labels.domain=\"$domain\"" |\
 	yq -r -y ".metadata.labels.app=\"$pod_name\"" | \
 	( [ -z "$pod_http_port" ] && cat || yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" ) |\
-	( [ -z "$nfs_storage_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]" )
+	( [ -z "$nfs_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]" )
 
 	### SSH service
 	if [ -n "$ssh_public_key" ]; then
@@ -383,19 +411,22 @@ if [ -n "$pod_name" ]; then
 		cat "$SSH_SERVICE_YAML_FILE"| yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
 		yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
 	fi
-	if [ -n "$nfs_storage_path" ]; then
+	if [[ -n "$nfs_storage_path" || -n "$nfs_files_path" ]]; then
 		### NFS volume
 		if [ -n "$create_nfs_volume" ]; then
 			echo "---"
 			cat "$NFS_VOLUME_YAML_FILE" | \
 			sed "s|NFS_VOLUME_NAME|${nfs_volume_name}|g" | \
-			sed "s|STORAGE_PATH|${owner}/${nfs_storage_path}|g" | \
+			sed "s|NFS_VOLUME_PATH|${nfs_volume_path}|g" | \
+			sed "s|NFS_ACCESS_MODE|${nfs_access_mode}|g" | \
+			sed "s|NFS_ACCESS|${nfs_access}|g" | \
 			sed "s|SERVER_IP|$home_server|g"
 		fi
 		### NFS persistent volume claim
 		if [ -n "$create_nfs_claim" ]; then
 			echo "---"
 			cat "$NFS_CLAIM_YAML_FILE" | \
+			sed "s|NFS_ACCESS_MODE|${nfs_access_mode}|g" | \
 			sed "s|NFS_VOLUME_NAME|${nfs_volume_name}|g" | \
 			sed "s|NFS_CLAIM_NAME|${nfs_claim_name}|g"
 		fi

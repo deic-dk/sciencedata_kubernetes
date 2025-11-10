@@ -6,8 +6,8 @@ spec:
   storageClassName: nfs
   #storageClassName: ""
   accessModes:
-    - ReadWriteMany
+    - NFS_ACCESS_MODE # will be configured by run_pod
   resources:
     requests:
       storage: 10Gi # ignored
-  volumeName: NFS_VOLUME_NAME
+  volumeName: NFS_VOLUME_NAME # will be configured by run_pod

@@ -7,7 +7,7 @@ spec:
     storage: 10Gi # ignored
   volumeMode: Filesystem
   accessModes:
-    - ReadWriteMany
+    - NFS_ACCESS_MODE # will be configured by run_pod
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs
   mountOptions:
@@ -16,8 +16,9 @@ spec:
     - noatime
     - nodiratime
     - async
+    - NFS_ACCESS # will be configured by run_pod
   nfs:
-    path: /tank/storage/STORAGE_PATH # will be configured by run_pod
+    path: NFS_VOLUME_PATH # will be configured by run_pod
     server: SERVER_IP # will be configured by run_pod.sh
   claimRef:
     name: NFS_VOLUME_NAME # will be configured by run_pod
