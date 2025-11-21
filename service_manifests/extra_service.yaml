@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ubuntu-focal-extra # will be configured by run_pod
+spec:
+  #externalIPs:
+  #  - kube.sciencedata.dk
+  type: NodePort
+  ports:
+    ## This looks like a bug: If port is omitted, Kubernetes complains.
+    ## If set to N, requests to port N (along with the assigned nodePort)
+    ## on kube are forwarded
+    ## to the first pod. I.e. if we set it to 22, we can no longer
+    ## ssh to kube. Thus we set it randomly to 3483.
+    # nodePort will be configured by run_pod if there's a reserved port in /usr/local/etc/pod_extra_ports.txt
+    # targetPort will be configured by run_pod from POD_EXTRA_PORT in the YAML
+  - port: 3483
+    nodePort: NODE_PORT
+    targetPort: EXTRA_PORT
+    name: extra-tcp
+    protocol: TCP
+  - port: 3483 
+    nodePort: NODE_PORT
+    targetPort: EXTRA_PORT
+    name: extra-udp
+    protocol: UDP
+  selector:
+    app: ubuntu # will be configured by run_pod

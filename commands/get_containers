@@ -5,7 +5,7 @@ TMPDIR="/tmp"
 now_seconds=`date +"%s"`
 
 echo "###" >&2
-echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri" >&2
+echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri|extra_ports" >&2
 echo "###" >&2
 
 owner="$@"
@@ -20,7 +20,7 @@ if [[ -n "$owner" ]]; then
     fi
 fi
 
-echo $(kubectl get pods ${labels:+"$labels"} -o json) |\
+echo $(kubectl get pods ${labels:+"$labels"} --all-namespaces -o json) |\
     jq -r '.items[] | {name: .metadata.name, '\
 'cname: [.spec.containers[].name][0]?, '\
 'image: [.spec.containers[].image][0]?, '\
@@ -64,8 +64,11 @@ echo $(kubectl get pods ${labels:+"$labels"} -o json) |\
         else
             owner="$user"
         fi
-        node_port=`kubectl get service "${pod_name}-ssh" -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
+        ssh_port=`kubectl get service "${pod_name}-ssh" --all-namespaces -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
+        extra_ports=`kubectl get service  --all-namespaces | grep "${pod_name}-extra" 2>/dev/null | sed -E 's|^.+-([0-9]+) +.+ +[0-9]+:([0-9]+)/.+|\1:\2|'`
+        extra_ports=`echo $extra_ports | sed 's| |,|g'`
         uri=`cat ${TMPDIR}/uri-${pod_name} 2>/dev/null`
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" "${array[3]}"\
-               "${array[4]}" "$owner" "$diff_seconds" "$state:$status" "$node_port" "${array[11]}" "${array[12]}" "$uri"
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" \
+        "${array[3]}" "${array[4]}" "$owner" "$diff_seconds" "$state:$status" "$ssh_port" "${array[11]}" \
+        "${array[12]}" "$uri" "$extra_ports"
 done

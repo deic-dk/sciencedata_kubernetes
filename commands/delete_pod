@@ -70,6 +70,17 @@ stop_ssh_service() {
 	fi
 }
 
+stop_extra_service() {
+	extra_service_name="${pod_name}-extra"
+	$run kubectl get service | grep "$extra_service_name" 2>/dev/null | while read name; do
+		extra_name=`echo $name | awk '{print $1}'`
+		if [[ "$?" == 0 ]]; then
+			echo "INFO: Stopping extra service $extra_name" >> "$logfile"
+			$run kubectl delete service "$extra_name" &>> "$logfile"
+		fi
+	done
+}
+
 check_claim_used() {
 	mount_regex=Used\ By:\ *
 	done_regex=[a-zA-Z]+:\ *
@@ -135,5 +146,6 @@ $run kubectl delete pod "$pod_name" &>> "$logfile" &
 
 # start slow process
 stop_ssh_service &>> "$logfile" &
+stop_extra_service &>> "$logfile" &
 
 exit 0

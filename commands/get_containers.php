@@ -27,14 +27,14 @@ if(empty($owner)){
 	}
 }
 
-if(empty($fields) || $fields!="include" || $fields!="yes" || $fields!="true"){
+if(empty($fields) || $fields=="include"){
 	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner" 2>&1 | grep '|' | grep -v '^#'`;
 }
-elseif($fields=="include"){
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner"`;
-}
-else{// only fields - fields=yes or fields=true
+elseif($fields=="yes" || $fields=="true"){// only fields 
 	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner" 2>&1 | head -2 | tail -1 | sed -E 's|^#||'`;
+}
+else{// only values
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner"`;
 }
 
 ?>

@@ -43,12 +43,15 @@ cmd="`echo $(readlink -f \"$0\")`"
 DIR="`dirname $cmd`"
 
 SSH_SERVICE_YAML_FILE="$DIR/../service_manifests/ssh_service.yaml"
+EXTRA_SERVICE_YAML_FILE="$DIR/../service_manifests/extra_service.yaml"
 NFS_VOLUME_YAML_FILE="$DIR/../service_manifests/nfs_volume.yaml"
 NFS_CLAIM_YAML_FILE="$DIR/../service_manifests/nfs_claim.yaml"
 LOCAl_VOLUME_YAML_FILE="$DIR/../service_manifests/local_volume.yaml"
 LOCAL_CLAIM_YAML_FILE="$DIR/../service_manifests/local_claim.yaml"
 CADDY_FILE="$DIR/../service_manifests/Caddyfile"
 TMPDIR="/tmp"
+HTTPS_PORTS_FILE="/usr/local/etc/pod_https_ports.txt"
+EXTRA_PORTS_FILE="/usr/local/etc/pod_extra_ports.txt"
 
 yaml_file=""
 owner=""
@@ -92,7 +95,7 @@ start_reverse_proxy() {
 	fi
 }
 
-while getopts "o:s:k:r:f:l:m:p:d" flag; do
+while getopts "o:s:k:r:f:l:m:p:x:d" flag; do
 	case "$flag" in
 		o)
 			# ScienceData userid who will own the pod
@@ -136,6 +139,13 @@ while getopts "o:s:k:r:f:l:m:p:d" flag; do
 			# Port of web server running in the pod, i.e.
 			# the port that will be proxied to
 			pod_http_port=$OPTARG
+			;;
+		x)
+			# Extra mapped port of service running in the pod, i.e.
+			# the port that will be proxied to (both TCP and UDP).
+			# The assigned external port can be inspected after boot.
+			# A space-separated list of port numbers is allowed
+			pod_extra_port=$OPTARG
 			;;
 		d)
 			# If set, no actions are performed, only reported
@@ -235,7 +245,7 @@ if [ -z "$pod_http_port" ]; then
 	# No HTTP port given on stdin, try getting it from env
 	pod_http_port="$POD_HTTP_PORT"
 	if [ -z "$pod_http_port" ]; then
-		# Try getting POD HTTP port from yaml
+		# Try getting HTTP port from yaml
 		pod_http_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"POD_HTTP_PORT\") | .value'`"
 		# If port 80 is exposed, we assume it's a web server
 		if [ -z "$pod_http_port" ]; then
@@ -244,12 +254,21 @@ if [ -z "$pod_http_port" ]; then
 	fi
 fi
 
+if [ -z "$pod_extra_port" ]; then
+	# No extra port given on stdin, try getting it from env
+	pod_extra_port="$POD_EXTRA_PORT"
+	if [ -z "$pod_extra_port" ]; then
+		# Try getting extra port from yaml
+		pod_extra_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"POD_EXTRA_PORT\") | .value'`"
+	fi
+fi
 
 user=`echo $owner | awk -F@ '{print $1}'`
 domain=`echo $owner | awk -F@ '{print $2}'`
 owner_str=`echo $owner | sed 's|[@._]|-|g'`
 
-pod_name="`cat \"$yaml_file\" | yq -r .metadata.name | head -1`-${owner_str}"
+pod_base_name="`cat \"$yaml_file\" | yq -r .metadata.name | head -1`"
+pod_name="${pod_base_name}-${owner_str}"
 
 # Try up to 9 times to append to name if pod with this name is already running (i.service/jupyter-fror-dtu-dk-ssh. allow 10 copies per user)
 new_pod_name="${pod_name}"
@@ -308,7 +327,7 @@ if [[ -n "$nfs_storage_path" || -n "$nfs_files_path" ]]; then
 		fi
 	fi
 	nfs_volume_path=/${prefix}/${owner}/${suffix}${nfs_path}
-	nfs_volume_name="nfs-${home_server}-${owner_str}-$(sed 's|[/\. ]|-|g' <<< ${prefix})-$(sed 's|[/\. ]|-|g' <<< ${nfs_path})"
+	nfs_volume_name="nfs-${home_server}-${owner_str}-$(sed 's|[/\. ]|-|g' <<< ${prefix})-$(echo ${nfs_path} | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}')"
 	nfs_claim_name=$nfs_volume_name # just use the same name
 	if [ $home_server ]; then
 		# Check if the volume is already mounted
@@ -331,7 +350,7 @@ fi
 
 if [ -n "$local_storage_path" ]; then
 	while read lsp; do
-		local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g'`
+		local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
 		# Check if directory exists - TODO: perhaps drop this - the directory only needs to exist on the workers
 		#if [ -d "$lsp" ]; then
 			kubectl get pv | grep "local-${local_storage_name}" >& /dev/null
@@ -358,10 +377,25 @@ fi
 
 # Find free port for Caddy proxy in range 2000-3000 iff there is a port to forward to
 if [[ -n $pod_http_port ]]; then
-  for reverse_proxy_port in {2000..3000}; do
-  	ps aux | grep "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-" >& /dev/null || break
-  	ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" >&/dev/null || break
-  done
+	# Look for a match in $HTTPS_PORTS_FILE. If found, assign nodePort to this - unless
+	# there's already a pod running with this port assigned.
+	echo "Looking for $pod_name: in $HTTPS_PORTS_FILE " >> "$logfile"
+	if [ -n "`grep ^$pod_name: $HTTPS_PORTS_FILE 2>/dev/null`" ]; then
+		reserved_https_port=`grep ^$pod_name: $HTTPS_PORTS_FILE | awk -F: '{print $NF}'`
+		# Check if somebody's using it
+		if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_https_port/ 2>/dev/null`" ]; then
+			if [ "$reserved_https_port" != 443 -a "$reserved_https_port" != 22 ]; then
+				reverse_proxy_port=$reserved_https_port
+			fi
+		else
+			echo "Requested port, $reserved_https_port, in use" >> "$logfile"
+		fi
+	else
+		for reverse_proxy_port in {2000..3000}; do
+		ps aux | grep "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-" >& /dev/null || break
+		ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" >&/dev/null || break
+		done
+	fi
 else
   reverse_proxy_port=''
 fi
@@ -378,7 +412,7 @@ if [ -n "$pod_name" ]; then
 	# Deal with local mounts (/usr/local/software and CVMFS repositories)
 	if [ -n "$local_storage_mountpath" ]; then
 		while read lsp; do
-			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g'`
+			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
 			# pop off the first element
 			lsm=`echo $local_storage_mountpath | sed -E 's|^([^,]+),(.*)|\1|'`
 			local_storage_mountpath=`echo $local_storage_mountpath | sed -E 's|^([^,]+),||'`
@@ -405,12 +439,54 @@ if [ -n "$pod_name" ]; then
 	( [ -z "$pod_http_port" ] && cat || yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" ) |\
 	( [ -z "$nfs_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]" )
 
-	### SSH service
+	### SSH service/port
 	if [ -n "$ssh_public_key" ]; then
 		echo "---"
-		cat "$SSH_SERVICE_YAML_FILE"| yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
-		yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
+		cat "$SSH_SERVICE_YAML_FILE"| \
+		yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
+		yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | \
+		yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
 	fi
+	### Extra service/port
+	if [ -n "$pod_extra_port" ]; then
+		i=0
+		# We assume $pod_extra_port is a space-separated list. Just one is fine.
+		# Notice that if e.g. POD_EXTRA_PORT is set to "3483 9000" in the pod YAML,
+		# a matching entry in /usr/local/etc/pod_extra_ports.txt also has to have 3 entries, e.g.
+		# ubuntu-noble-lyrion-fror-dtu-dk:3483 3483
+		for pod_port in $pod_extra_port; do
+			# Look for a match in $EXTRA_PORTS_FILE. If found, assign nodePort to this - unless
+			# there's already a pod running with this port assigned.
+			if [ -n "`grep ^$pod_name: $EXTRA_PORTS_FILE 2>/dev/null`" ]; then
+				reserved_extra_port=`grep ^$pod_name: $EXTRA_PORTS_FILE | awk -F: '{print $NF}'`
+			fi
+			if [ -n "`grep ^$pod_base_name: $EXTRA_PORTS_FILE 2>/dev/null`" ]; then
+				reserved_extra_port=`grep ^$pod_base_name: $EXTRA_PORTS_FILE | awk -F: '{print $NF}'`
+			fi
+			node_port_line="#"
+			if [ -n "$reserved_extra_port" ]; then 
+				read -r -a reserved_extra_port_arr <<< "$reserved_extra_port"
+				reserved_port=${reserved_extra_port_arr[$i]}
+				# Check if somebody's using it
+				if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_port/ 2>/dev/null`" ]; then
+					if [ "$reserved_port" != 443 -a "$reserved_port" != 22 ]; then
+						node_port_line="nodePort: $reserved_port"
+					fi
+				else
+					echo "Requested port, $reserved_port, in use" >> "$logfile"
+				fi
+			fi
+			echo "---"
+			cat "$EXTRA_SERVICE_YAML_FILE" | \
+			sed "s|EXTRA_PORT|${pod_port}|g" | \
+			sed "s|nodePort: NODE_PORT|${node_port_line}|g" | \
+			yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
+			yq -r -y ".metadata.name=\"${pod_name}-extra-${pod_port}\"" |\
+			yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
+			i=$(($i+1))
+		done
+	fi
+	### NFS
 	if [[ -n "$nfs_storage_path" || -n "$nfs_files_path" ]]; then
 		### NFS volume
 		if [ -n "$create_nfs_volume" ]; then
@@ -435,7 +511,7 @@ if [ -n "$pod_name" ]; then
 	echo "Creating volumes $create_local_volume" >> "$logfile"
 	if [ -n "$create_local_volume" ]; then
 		while read lsp; do
-			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g'`
+			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
 			echo "---"
 			cat "$LOCAl_VOLUME_YAML_FILE" | \
 			sed "s|LOCAL_VOLUME_NAME|local-${local_storage_name}|g" | \
@@ -447,7 +523,7 @@ if [ -n "$pod_name" ]; then
 	### Local persistent volume claim
 	if [ -n "$create_local_claim" ]; then
 		while read lsp; do
-			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g'`
+			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
 			echo "---"
 			cat "$LOCAL_CLAIM_YAML_FILE" | \
 			sed "s|LOCAL_CLAIM_NAME|local-claim-${local_storage_name}|g" | \
