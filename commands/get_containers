@@ -20,6 +20,12 @@ if [[ -n "$owner" ]]; then
     fi
 fi
 
+function getService(){
+	name=$1
+	namespaces=`kubectl get namespaces | grep -E -v 'kube-|NAME' | awk '{print $1}' | tr '\n' ' '`
+	for namespace in $namespaces; do kubectl get service -o json $name --namespace $namespace 2>/dev/null; done
+}
+
 echo $(kubectl get pods ${labels:+"$labels"} --all-namespaces -o json) |\
     jq -r '.items[] | {name: .metadata.name, '\
 'cname: [.spec.containers[].name][0]?, '\
@@ -64,8 +70,8 @@ echo $(kubectl get pods ${labels:+"$labels"} --all-namespaces -o json) |\
         else
             owner="$user"
         fi
-        ssh_port=`kubectl get service "${pod_name}-ssh" --all-namespaces -o json 2>/dev/null | jq -r '.spec.ports[].nodePort'`
-        extra_ports=`kubectl get service  --all-namespaces | grep "${pod_name}-extra" 2>/dev/null | sed -E 's|^.+-([0-9]+) +.+ +[0-9]+:([0-9]+)/.+|\1:\2|'`
+        ssh_port=`getService "${pod_name}-ssh" | jq -r '.spec.ports[].nodePort'`
+        extra_ports=`kubectl get service --all-namespaces | grep "${pod_name}-extra" 2>/dev/null | sed -E 's|^.+-([0-9]+) +.+ +[0-9]+:([0-9]+)/.+|\1:\2|'`
         extra_ports=`echo $extra_ports | sed 's| |,|g'`
         uri=`cat ${TMPDIR}/uri-${pod_name} 2>/dev/null`
         printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" \
