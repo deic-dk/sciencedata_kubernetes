@@ -33,7 +33,7 @@ if(empty($fields) || $fields=="include"){
 elseif($fields=="yes" || $fields=="true"){// only fields 
 	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner" 2>&1 | head -2 | tail -1 | sed -E 's|^#||'`;
 }
-else{// only values
+else{// fields=no , i.e. only values
 	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner"`;
 }
 
