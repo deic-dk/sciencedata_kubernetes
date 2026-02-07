@@ -56,6 +56,8 @@ EXTRA_PORTS_FILE="/usr/local/etc/pod_extra_ports.txt"
 yaml_file=""
 owner=""
 ssh_public_key=""
+username=""
+allowed_ip=""
 nfs_storage_path=""
 nfs_files_path=""
 dryrun=
@@ -95,7 +97,7 @@ start_reverse_proxy() {
 	fi
 }
 
-while getopts "o:s:k:r:f:l:m:p:x:d" flag; do
+while getopts "o:s:k:i:r:f:l:m:p:x:d" flag; do
 	case "$flag" in
 		o)
 			# ScienceData userid who will own the pod
@@ -109,6 +111,11 @@ while getopts "o:s:k:r:f:l:m:p:x:d" flag; do
 		k)
 			# Public key to be inserted into /root/.ssh/authorized_keys
 			ssh_public_key=$OPTARG
+			;;
+		i)
+			# IP address (may contain wildcard) to be added to /etc/hosts.allow
+			# If present, ALL will be added to /etc/hosts.deny
+			allowed_ip=$OPTARG
 			;;
 		r)
 			# Path on home server to be claimed, relative to /tank/storage/owner/
@@ -211,6 +218,11 @@ if [ "$?" -eq "0" ]; then
 	exit -3
 fi
 
+username="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"USERNAME\") | .value'`"
+if [ -z "$username" ]; then
+	username=root
+fi
+
 if [ -z "$ssh_public_key" ]; then
 	# No ssh public key given on stdin, try getting it from env
 	ssh_public_key="$SSH_PUBLIC_KEY"
@@ -263,9 +275,22 @@ if [ -z "$pod_extra_port" ]; then
 	fi
 fi
 
+yaml_user=`cat \"$yaml_file\" | yq -r -y ".metadata.labels.user"`
+yaml_domain=`cat \"$yaml_file\" | yq -r -y ".metadata.labels.domain"`
+
 user=`echo $owner | awk -F@ '{print $1}'`
 domain=`echo $owner | awk -F@ '{print $2}'`
 owner_str=`echo $owner | sed 's|[@._]|-|g'`
+
+if [[ "$yaml_user" != "" && "$yaml_user" != "$user" ]]; then
+	echo "ERROR: Not allowed, $yaml_user != $user"  >&2
+	exit -1
+fi
+
+if [[ "$yaml_domain" != "" && "$yaml_domain" != "$domain" ]]; then
+	echo "ERROR: Not allowed, $yaml_domain != $domain"  >&2
+	exit -1
+fi
 
 pod_base_name="`cat \"$yaml_file\" | yq -r .metadata.name | head -1`"
 pod_name="${pod_base_name}-${owner_str}"
@@ -421,8 +446,29 @@ if [ -n "$pod_name" ]; then
 		done <<< $(echo "$local_storage_path" | sed "s|,|\n|g")
 	fi
 
+### Add user public key to authorized_keys
+if [ -n "$ssh_public_key" ]; then
+cmd="eval home=~$username \&\& ( ls \$home/.ssh || mkdir \$home/.ssh ) \&\& echo \\\\\"$ssh_public_key\\\\\" >> \$home/.ssh/authorized_keys \&\& chown -R \$username \$home/.ssh \&\& chmod -R go-rw \$home/.ssh"
+fi
+### Add $allowed_ip to hosts.allow
+### This does not work with dropbear because dropbear does not use tcp wrappers.
+### It also does not work with openssh because the original source IP is changed by kubernetes.
+### "ExternalTrafficPolicy: Local" does not seem to work.
+### https://stackoverflow.com/questions/52817382/no-response-when-externaltrafficpolicy-is-set-to-local
+if [ -n "$allowed_ip" ]; then
+cmd="$cmd; grep '^ALL' /etc/hosts.deny || echo ALL >> /etc/hosts.deny; grep $allowed_ip /etc/hosts.deny || echo \\\\\"sshd :  $allowed_ip : allow\\\\\" >> /etc/hosts.allow"
+fi
+cmd_add=$(
+	cat <<EOF | sed '$!s/$/\\/' | sed 's/|/\\\|/g'
+      lifecycle:
+        postStart:
+          exec:
+            command: [\"/bin/bash\", \"-c\", \"$cmd\"]
+EOF
+)
+
 	### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
-  modified_yaml=$( echo "$modified_yaml" | \
+	modified_yaml=$( echo "$modified_yaml" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SD_UID\") | .value) |= \"$owner\"" | \
 	yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$FILE\"" | \
@@ -437,8 +483,8 @@ if [ -n "$pod_name" ]; then
 	yq -r -y ".metadata.labels.domain=\"$domain\"" |\
 	yq -r -y ".metadata.labels.app=\"$pod_name\"" | \
 	( [ -z "$pod_http_port" ] && cat || yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" ) |\
-	( [ -z "$nfs_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]" )
-
+	( [ -z "$nfs_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]" ) #| \
+	#sed "s|^      env:|${cmd_add}\n      env:|"
 	### SSH service/port
 	if [ -n "$ssh_public_key" ]; then
 		echo "---"
@@ -530,8 +576,8 @@ if [ -n "$pod_name" ]; then
 			sed "s|LOCAL_STORAGE_CLASS_NAME|manual-${local_storage_name}|g"
 		done <<< $(echo "$create_local_claim" | sed "s|,|\n|g")
 	fi
-
- )
+	)
+	### End modify pod YAML
 
 	echo "YAML now: $modified_yaml" >> "$logfile"
 	
