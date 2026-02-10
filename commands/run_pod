@@ -406,7 +406,12 @@ if [[ -n $pod_http_port ]]; then
 	# there's already a pod running with this port assigned.
 	echo "Looking for $pod_name: in $HTTPS_PORTS_FILE " >> "$logfile"
 	if [ -n "`grep ^$pod_name: $HTTPS_PORTS_FILE 2>/dev/null`" ]; then
-		reserved_https_port=`grep ^$pod_name: $HTTPS_PORTS_FILE | awk -F: '{print $NF}'`
+		if [ -n "`grep ^$pod_name: $HTTPS_PORTS_FILE 2>/dev/null`" ]; then
+			reserved_https_port=`grep ^$pod_name: $HTTPS_PORTS_FILE | awk -F: '{print $NF}'`
+		fi
+		if [ -n "`grep ^$pod_base_name: $HTTPS_PORTS_FILE 2>/dev/null`" ]; then
+			reserved_https_port=`grep ^$pod_base_name: $HTTPS_PORTS_FILE | awk -F: '{print $NF}'`
+		fi
 		# Check if somebody's using it
 		if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_https_port/ 2>/dev/null`" ]; then
 			if [ "$reserved_https_port" != 443 -a "$reserved_https_port" != 22 ]; then
@@ -498,8 +503,8 @@ EOF
 		i=0
 		# We assume $pod_extra_port is a space-separated list. Just one is fine.
 		# Notice that if e.g. POD_EXTRA_PORT is set to "3483 9000" in the pod YAML,
-		# a matching entry in /usr/local/etc/pod_extra_ports.txt also has to have 3 entries, e.g.
-		# ubuntu-noble-lyrion-fror-dtu-dk:3483 3483
+		# a matching entry in /usr/local/etc/pod_extra_ports.txt also has to have 2 entries, e.g.
+		# ubuntu-noble-lyrion-fror-dtu-dk:3483 9000
 		for pod_port in $pod_extra_port; do
 			# Look for a match in $EXTRA_PORTS_FILE. If found, assign nodePort to this - unless
 			# there's already a pod running with this port assigned.
