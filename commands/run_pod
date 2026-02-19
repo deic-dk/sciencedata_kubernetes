@@ -460,6 +460,7 @@ fi
 ### It also does not work with openssh because the original source IP is changed by kubernetes.
 ### "ExternalTrafficPolicy: Local" does not seem to work.
 ### https://stackoverflow.com/questions/52817382/no-response-when-externaltrafficpolicy-is-set-to-local
+### Thus, adding this to the yaml is commented out for now (see below).
 if [ -n "$allowed_ip" ]; then
 cmd="$cmd; grep '^ALL' /etc/hosts.deny || echo ALL >> /etc/hosts.deny; grep $allowed_ip /etc/hosts.deny || echo \\\\\"sshd :  $allowed_ip : allow\\\\\" >> /etc/hosts.allow"
 fi
