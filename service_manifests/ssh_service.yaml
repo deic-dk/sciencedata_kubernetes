@@ -13,7 +13,8 @@ spec:
     ## to the first pod. I.e. if we set it to 22, we can no longer
     ## ssh to kube. Thus we set it randomly to 6022.
   - port: 6022 
-    # nodePort will be assigned by Kubernetes
+    # If left out, nodePort will be assigned by Kubernetes, we let run_pod assign
+    nodePort: -1
     targetPort: 22
     name: ssh
     protocol: TCP

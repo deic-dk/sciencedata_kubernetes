@@ -17,17 +17,22 @@ if(empty($_SERVER['REMOTE_ADDR']) || strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0
 	exit;
 }
 
+// W/o this, GET parameters could contain shell commands wrapped in ``
+// - which would get passed to the called shell script - and executed
+$_GET = array_map(function($x){return escapeshellcmd($x);}, $_GET);
+
 $owner = $_GET['user_id']; // ID of the user logged into ScienceData and starting the pod
 $mount_path = empty($_GET['mount_path'])?"":$_GET['mount_path']; // Path to mount relative to the URI /storage/ or /files/
 $mount_root = empty($_GET['mount_root'])?"":$_GET['mount_root']; // storage or files
 $cvmfs_repos = empty($_GET['cvmfs_repos'])?"":$_GET['cvmfs_repos']; // Comma-separated list of CVMFS repositories
 $public_key = empty($_GET['public_key'])?"":$_GET['public_key']; // SSH public key of the user
-$allowed_ip = empty($_GET['allowed_ip'])?"":$_GET['allowed_ip']; // SSH public key of the user
+$allowed_ip = empty($_GET['allowed_ip'])?"":$_GET['allowed_ip']; // IP allowed to ssh to the pod
 $file = empty($_GET['file'])?"":$_GET['file']; // File top open inside pod
 $peers = empty($_GET['peers'])?"":$_GET['peers']; // Pod peers of the form host1:ip1,host2:ip2,...
 $setup_script = empty($_GET['setup_script'])?"":$_GET['setup_script']; // Setup script to run open inside pod
 $yaml_url = $_GET['yaml_url']; // URL of the YAML file to apply - read using the supplied user ID if it starts with
 															// /shared/, /files/, /group/, /sharingin/, /storage/, otherwise read with admin privileges (system/app file).
+$pod_type = empty($_GET['type'])?"":$_GET['type']; // Pod peers of the form host1:ip1,host2:ip2,...
 
 if(empty($owner)){
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);
@@ -124,6 +129,7 @@ $cmd = '/bin/bash -c set -o pipefail;' . // use bash with pipefail so the error 
 	' -s "' . $_SERVER['REMOTE_ADDR'] . '"' .
 	(empty($public_key)?'':(' -k "' . $public_key . '"')) .
 	(empty($allowed_ip)?'':(' -i "' . $allowed_ip . '"')) .
+	(empty($pod_type)?'':(' -t "' . $pod_type . '"')) .
 	(!empty($mount_root)&&$mount_root=='storage'&&!empty($mount_path)?(' -r "' . $mount_path . '"' ):'').
 	(!empty($mount_root)&&$mount_root=='files'&&!empty($mount_path)?(' -f "' . $mount_path . '"' ):'').
 	((empty($cvmfs_paths)||empty($cvmfs_mountpoints))?'':(' -l "' . $cvmfs_paths .

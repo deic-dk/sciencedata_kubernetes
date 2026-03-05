@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: batch
+  labels:
+    app: batch
+    user: cloud
+spec:
+  containers:
+  - name: batch
+    image: sciencedata/batch_server
+    env:
+    - name: USERNAME
+      value: 'root'
+    - name: SD_UID
+      value: 'cloud'
+    - name: HOME_SERVER
+      value: ''
+    - name: PUBLIC_HOME_SERVER
+      value: ''
+    - name: ONLY_FROM
+      value: "10.2.12.1"
+    - name: SSL_DN_HEADER
+      value: "SSL-Client-DN"
+    - name: TRUSTED_VOS
+      value: "https://sciencedata.dk/sites/batch/vos/anyone.txt"
+    - name: RTE_URLS
+      value: "https://sciencedata.dk/sites/batch/rtes/rtes.xml"
+    ports:
+    - name: https
+      containerPort: 443
+  #nodeName: peon152
+

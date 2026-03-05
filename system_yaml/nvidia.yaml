@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nvidia
+  labels:
+    app: nvidia
+spec:
+  containers:
+  #- image: nvcr.io/nvidia/cuda
+  - image: nvcr.io/nvidia/driver
+    command:
+      - "sleep"
+      - "604800"
+    imagePullPolicy: IfNotPresent
+    name: nvidia
+    resources:
+      limits:
+        nvidia.com/gpu: 1    #<-- ASSIGN 1 GPU, IF MULTIPLE
+  restartPolicy: Never
+  nodeName: worker1
+  runtimeClassName: nvidia   #<--- USE THE NVIDIA CONTAINER RUNTIME
+  nodeSelector:              #<--- RUN ON GPU ${NODE_NAME}
+    kubernetes.io/hostname: worker1

@@ -5,7 +5,7 @@ TMPDIR="/tmp"
 now_seconds=`date +"%s"`
 
 echo "###" >&2
-echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri|extra_ports" >&2
+echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri|extra_ports|allowed_ips" >&2
 echo "###" >&2
 
 owner="$@"
@@ -22,7 +22,7 @@ fi
 
 function getService(){
 	name=$1
-	namespaces=`kubectl get namespaces | grep -E -v 'kube-|NAME' | awk '{print $1}' | tr '\n' ' '`
+	namespaces=`kubectl get namespaces | grep -E -v 'kube\-|NAME' | awk '{print $1}' | tr '\n' ' '`
 	for namespace in $namespaces; do kubectl get service -o json $name --namespace $namespace 2>/dev/null; done
 }
 
@@ -71,10 +71,14 @@ echo $(kubectl get pods ${labels:+"$labels"} --all-namespaces -o json) |\
             owner="$user"
         fi
         ssh_port=`getService "${pod_name}-ssh" | jq -r '.spec.ports[].nodePort'`
-        extra_ports=`kubectl get service --all-namespaces | grep "${pod_name}-extra" 2>/dev/null | sed -E 's|^.+-([0-9]+) +.+ +[0-9]+:([0-9]+)/.+|\1:\2|'`
+        if [ -n "$ssh_port" ]; then
+          allowed_ips=`sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $ssh_port" | sed -E 's|.* -s (\S+) .*|\1|'`
+          allowed_ips=`echo $allowed_ips | sed -E 's| +|,|g'`
+        fi
+        extra_ports=`kubectl get service --all-namespaces | grep "${pod_name}\-extra" 2>/dev/null | sed -E 's|^.+-([0-9]+) +.+ +[0-9]+:([0-9]+)/.+|\1:\2|'`
         extra_ports=`echo $extra_ports | sed 's| |,|g'`
         uri=`cat ${TMPDIR}/uri-${pod_name} 2>/dev/null`
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" \
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" \
         "${array[3]}" "${array[4]}" "$owner" "$diff_seconds" "$state:$status" "$ssh_port" "${array[11]}" \
-        "${array[12]}" "$uri" "$extra_ports"
+        "${array[12]}" "$uri" "$extra_ports" "$allowed_ips"
 done

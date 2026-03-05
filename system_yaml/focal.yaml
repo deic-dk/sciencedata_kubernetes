@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: focal
+  labels:
+    app: focal
+spec:
+  containers:
+    #- image: ubuntu
+  - image: sciencedata/ubuntu_focal_sciencedata
+    command:
+      - "sleep"
+      - "604800"
+    imagePullPolicy: IfNotPresent
+    name: ubuntu
+  restartPolicy: Always
+

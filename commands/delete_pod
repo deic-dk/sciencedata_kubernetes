@@ -135,6 +135,29 @@ remove_persistent_volumes() {
 	done
 }
 
+remove_ssh_firewall_rules() {
+
+	# Find SSH port of pod
+	ssh_port=`kubectl get services --all-namespaces | grep " NodePort " | grep " $pod_name\-ssh " | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|'`
+	
+	# Delete blocking rule for this port - should only be this one:
+	# sudo iptables -t raw -D PREROUTING -p tcp --dport $ssh_port -j DROP
+	# But duplicates may be there (from crashes), so we iterate to delete all present
+	sudo iptables -t raw -S PREROUTING | grep DROP | grep "dport $ssh_port" | while read line; do
+		cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
+		$run sudo iptables $cmd
+	done
+	
+	# Delete nat ACCEPT rules for this port
+	# E.g. iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
+	sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $ssh_port" | while read line; do
+		allowed_ip=`echo $line | sed -E 's|.* -s (\S+) .*|\1|'`
+		cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
+		$run sudo iptables $cmd
+	done
+
+}
+
 stop_reverse_proxy &>> "$logfile" &
 
 # start slow process

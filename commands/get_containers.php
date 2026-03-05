@@ -16,6 +16,8 @@ function checkpassword($passwd){
 	return ($pass===$passwd);
 }
 
+$_GET = array_map(function($x){return escapeshellcmd($x);}, $_GET);
+
 $owner = $_GET['user_id']; // ID of the user logged into ScienceData
 $password = empty($_GET['password'])?'':$_GET['password']; // Only used if user_id is empty
 $fields = $_GET['fields']; // Get just the fields, the data or both fields and data

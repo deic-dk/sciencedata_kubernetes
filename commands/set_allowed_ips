@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# set_allowed_ips $pod_name $allowed_ip
+
+user=""
+run=""
+logfile='/var/log/kube.log'
+TMPDIR="/tmp"
+
+while getopts "u:d" flag; do
+	case "$flag" in
+		u)
+			user=$OPTARG
+			;;
+		d)
+			run="echo"
+			;;
+		\?)
+			echo "Invalid option: -$OPTARG" >&2
+			exit 1
+		;;
+		:)
+			echo "Option -$OPTARG requires an argument." >&2
+			exit 1
+		;;
+	esac
+done
+
+shift "$((OPTIND-1))"
+pod_name=$1 # name of pod
+allowed_ips=$2 # comma-separated list of CIDRs - no whitespace
+
+if [[ -z "$pod_name" || -z "$allowed_ips" ]]; then
+	echo "Usage:  set_allowed_ips pod_name allowed_ips" >&2
+	exit 1
+fi
+
+DIR="$(dirname "$(readlink -f "$0")")"
+
+get_pod_data() {
+	$DIR/get_containers $user 2>&1 | grep "^$pod_name|"
+}
+readarray -d '|' -t podInfo < <(get_pod_data)
+
+# If user is given, check that user owns pod
+if [ -n "$user" ]; then
+	owner="${podInfo[5]}"
+	if [[ "$owner" != "" && "$owner" != "$user" ]]; then
+		echo "ERROR: pod $pod_name owned by $owner, NOT $user" | tee -a "$logfile" >&2
+		exit 1
+	fi
+fi
+
+# Find SSH port of pod
+ssh_port=`kubectl get services --all-namespaces | grep " NodePort " | grep " $pod_name\-ssh " | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|'`
+
+# Delete nat ACCEPT rules for this port
+# E.g. iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
+sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $ssh_port" | while read line; do
+	allowed_ip=`echo $line | sed -E 's|.* -s (\S+) .*|\1|'`
+	cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
+	$run sudo iptables $cmd
+done
+
+# Add new rules
+echo $allowed_ips | sed "s|,|\n|" | while read allowed_ip; do
+	$run sudo iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
+done
+
+

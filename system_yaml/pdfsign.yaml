@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdfsign
+  labels:
+    app: x509
+spec:
+  ports:
+  - name: "80"
+    port: 80
+    targetPort: 80
+  selector:
+    x509-service-name: pdfsign
+status:
+  loadBalancer: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    x509-service-name: pdfsign
+  name: pdfsign
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      x509-service-name: pdfsign
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        x509-service-name: pdfsign
+        domain:
+        user: cloud
+    spec:
+      securityContext:
+        fsGroupChangePolicy: Always
+      imagePullSecrets:
+      - name: regcred
+      containers:
+      - args:
+        env:
+        - name: USERNAME
+          value: "www"
+        image: sciencedata/pdf_sign_sciencedata:latest
+        imagePullPolicy: "Always"
+        name: pdfsign
+        securityContext:
+          capabilities:
+            add: ["SYS_CHROOT"] 
+        ports:
+        - containerPort: 80
+          protocol: TCP
+      restartPolicy: Always
+      #nodeName: peon145
+---

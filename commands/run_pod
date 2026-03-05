@@ -58,6 +58,7 @@ owner=""
 ssh_public_key=""
 username=""
 allowed_ip=""
+pod_type=""
 nfs_storage_path=""
 nfs_files_path=""
 dryrun=
@@ -97,7 +98,7 @@ start_reverse_proxy() {
 	fi
 }
 
-while getopts "o:s:k:i:r:f:l:m:p:x:d" flag; do
+while getopts "o:s:k:i:t:r:f:l:m:p:x:d" flag; do
 	case "$flag" in
 		o)
 			# ScienceData userid who will own the pod
@@ -113,9 +114,12 @@ while getopts "o:s:k:i:r:f:l:m:p:x:d" flag; do
 			ssh_public_key=$OPTARG
 			;;
 		i)
-			# IP address (may contain wildcard) to be added to /etc/hosts.allow
-			# If present, ALL will be added to /etc/hosts.deny
+			# CIDR allowed to access SSH service
 			allowed_ip=$OPTARG
+			;;
+		t)
+			# Type of pod. Currently one of: medium, large, gpu1, gpu2
+			pod_type=$OPTARG
 			;;
 		r)
 			# Path on home server to be claimed, relative to /tank/storage/owner/
@@ -422,8 +426,8 @@ if [[ -n $pod_http_port ]]; then
 		fi
 	else
 		for reverse_proxy_port in {2000..3000}; do
-		ps aux | grep "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-" >& /dev/null || break
-		ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" >&/dev/null || break
+			ps aux | grep "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-" >& /dev/null || break
+			ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" >&/dev/null || break
 		done
 	fi
 else
@@ -435,180 +439,234 @@ if [ $home_server ]; then
 	export my_home_server=`echo $home_server | sed "s|^$SCIENCEDATA_INTERNAL_NET|$SCIENCEDATA_PRIVATE_NET|"`
 fi
 
-if [ -n "$pod_name" ]; then
+if [ -z "$pod_name" ]; then
+	echo "ERROR: Parsing .metadata.name from YAML failed" >&2
+	exit 2
+fi
 
-	modified_yaml=$( cat $yaml_file )
-	
-	# Deal with local mounts (/usr/local/software and CVMFS repositories)
-	if [ -n "$local_storage_mountpath" ]; then
-		while read lsp; do
-			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
-			# pop off the first element
-			lsm=`echo $local_storage_mountpath | sed -E 's|^([^,]+),(.*)|\1|'`
-			local_storage_mountpath=`echo $local_storage_mountpath | sed -E 's|^([^,]+),||'`
-			echo "Adding volume $lsm to $modified_yaml" >> "$logfile"
-			modified_yaml=$( ( yq -r -y ".spec.volumes|= .+ [{\"name\": \"local-${local_storage_name}\", \"persistentVolumeClaim\": {\"claimName\": \"local-claim-${local_storage_name}\"}}]" | yq -r -y ".spec.containers[].volumeMounts|= .+ [{\"name\": \"local-${local_storage_name}\", \"mountPath\":\"$lsm\"}]" ) <<< "$modified_yaml" )
-		done <<< $(echo "$local_storage_path" | sed "s|,|\n|g")
+modified_yaml=$( cat $yaml_file )
+
+# Deal with local mounts (/usr/local/software and CVMFS repositories)
+if [ -n "$local_storage_mountpath" ]; then
+	while read lsp; do
+		local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
+		# pop off the first element
+		lsm=`echo $local_storage_mountpath | sed -E 's|^([^,]+),(.*)|\1|'`
+		local_storage_mountpath=`echo $local_storage_mountpath | sed -E 's|^([^,]+),||'`
+		echo "Adding volume $lsm to $modified_yaml" >> "$logfile"
+		modified_yaml=$( ( yq -r -y ".spec.volumes|= .+ [{\"name\": \"local-${local_storage_name}\", \"persistentVolumeClaim\": {\"claimName\": \"local-claim-${local_storage_name}\"}}]" | yq -r -y ".spec.containers[].volumeMounts|= .+ [{\"name\": \"local-${local_storage_name}\", \"mountPath\":\"$lsm\"}]" ) <<< "$modified_yaml" )
+	done <<< $(echo "$local_storage_path" | sed "s|,|\n|g")
+fi
+
+### Add "enableServiceLinks: false" to prevent pods in the same namespace to see each others environment variables
+### See https://github.com/kubernetes/kubernetes/issues/89033
+modified_yaml=$( ( yq -r -y ".spec.enableServiceLinks = false" ) <<< "$modified_yaml" )
+
+### Add memory and CPU limits
+if [[ -n "$pod_type" ]]; then
+	modified_yaml=$( ( yq -r -y ".metadata.labels.type = $pod_type" ) <<< "$modified_yaml" )
+	if [[ "$pod_type" == "medium" || "$pod_type" == "gpu1" || "$pod_type" == "gpu4" ]]; then
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.memory = \"256Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.cpu = \"250m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.memory = \"512Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.cpu = \"500m\"" ) <<< "$modified_yaml" )
 	fi
+	if [[ "$pod_type" == "large" ]]; then
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.memory = \"1024Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.cpu = \"500m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.memory = \"4096Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.cpu = \"2000m\"" ) <<< "$modified_yaml" )	
+	fi
+	if [[ "$pod_type" == "gpu1" ]]; then
+		modified_yaml=$( ( yq -r -y ".spec.runtimeClassName = nvidia" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.nvidia.com/gpu = 1" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= 1" ) <<< "$modified_yaml" )
+		
+	fi
+	if [[ "$pod_type" == "gpu4" ]]; then
+		modified_yaml=$( ( yq -r -y ".spec.runtimeClassName = nvidia" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.nvidia.com/gpu = 4" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= 4" ) <<< "$modified_yaml" )
+	fi
+fi
 
 ### Add user public key to authorized_keys
 if [ -n "$ssh_public_key" ]; then
 cmd="eval home=~$username \&\& ( ls \$home/.ssh || mkdir \$home/.ssh ) \&\& echo \\\\\"$ssh_public_key\\\\\" >> \$home/.ssh/authorized_keys \&\& chown -R \$username \$home/.ssh \&\& chmod -R go-rw \$home/.ssh"
 fi
+
 ### Add $allowed_ip to hosts.allow
 ### This does not work with dropbear because dropbear does not use tcp wrappers.
 ### It also does not work with openssh because the original source IP is changed by kubernetes.
 ### "ExternalTrafficPolicy: Local" does not seem to work.
 ### https://stackoverflow.com/questions/52817382/no-response-when-externaltrafficpolicy-is-set-to-local
 ### Thus, adding this to the yaml is commented out for now (see below).
-if [ -n "$allowed_ip" ]; then
-cmd="$cmd; grep '^ALL' /etc/hosts.deny || echo ALL >> /etc/hosts.deny; grep $allowed_ip /etc/hosts.deny || echo \\\\\"sshd :  $allowed_ip : allow\\\\\" >> /etc/hosts.allow"
-fi
-cmd_add=$(
-	cat <<EOF | sed '$!s/$/\\/' | sed 's/|/\\\|/g'
-      lifecycle:
-        postStart:
-          exec:
-            command: [\"/bin/bash\", \"-c\", \"$cmd\"]
-EOF
-)
+#if [ -n "$allowed_ip" ]; then
+#cmd="$cmd; grep '^ALL' /etc/hosts.deny || echo ALL >> /etc/hosts.deny; grep $allowed_ip /etc/hosts.deny || echo \\\\\"sshd :  $allowed_ip : allow\\\\\" >> /etc/hosts.allow"
+#cmd_add=$(
+#	cat <<EOF | sed '$!s/$/\\/' | sed 's/|/\\\|/g'
+#      lifecycle:
+#        postStart:
+#          exec:
+#            command: [\"/bin/bash\", \"-c\", \"$cmd\"]
+#EOF
+#)
+#fi
 
-	### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
-	modified_yaml=$( echo "$modified_yaml" | \
-	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
-	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SD_UID\") | .value) |= \"$owner\"" | \
-	yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$FILE\"" | \
-  yq -r "(.spec.containers[]?.env[]? | select(.name == \"PEERS\") | .value) |= \"$PEERS\"" | \
-	yq -r "(.spec.containers[]?.env[]? | select(.name == \"SETUP_SCRIPT\") | .value) |= \"$SETUP_SCRIPT\"" | \
-	yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
-  yq -r "(.spec.containers[]?.env[]? | select(.name == \"HTTPS_PORT\") | .value) |= \"$reverse_proxy_port\"" | \
-	yq -r "(.spec.containers[]?.env[]? | select(.name == \"PUBLIC_HOME_SERVER\") | .value) |= \"$public_home_server\"" | \
-	sed "s|HOME_SERVER/storage/mathpass|${my_home_server}/storage/mathpass|" | \
-	yq -r -y ".metadata.name=\"$pod_name\"" |\
-	yq -r -y ".metadata.labels.user=\"$user\"" | \
-	yq -r -y ".metadata.labels.domain=\"$domain\"" |\
-	yq -r -y ".metadata.labels.app=\"$pod_name\"" | \
-	( [ -z "$pod_http_port" ] && cat || yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" ) |\
-	( [ -z "$nfs_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]" ) #| \
-	#sed "s|^      env:|${cmd_add}\n      env:|"
-	### SSH service/port
-	if [ -n "$ssh_public_key" ]; then
-		echo "---"
-		cat "$SSH_SERVICE_YAML_FILE"| \
-		yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
-		yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | \
-		yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
-	fi
-	### Extra service/port
-	if [ -n "$pod_extra_port" ]; then
-		i=0
-		# We assume $pod_extra_port is a space-separated list. Just one is fine.
-		# Notice that if e.g. POD_EXTRA_PORT is set to "3483 9000" in the pod YAML,
-		# a matching entry in /usr/local/etc/pod_extra_ports.txt also has to have 2 entries, e.g.
-		# ubuntu-noble-lyrion-fror-dtu-dk:3483 9000
-		for pod_port in $pod_extra_port; do
-			# Look for a match in $EXTRA_PORTS_FILE. If found, assign nodePort to this - unless
-			# there's already a pod running with this port assigned.
-			if [ -n "`grep ^$pod_name: $EXTRA_PORTS_FILE 2>/dev/null`" ]; then
-				reserved_extra_port=`grep ^$pod_name: $EXTRA_PORTS_FILE | awk -F: '{print $NF}'`
-			fi
-			if [ -n "`grep ^$pod_base_name: $EXTRA_PORTS_FILE 2>/dev/null`" ]; then
-				reserved_extra_port=`grep ^$pod_base_name: $EXTRA_PORTS_FILE | awk -F: '{print $NF}'`
-			fi
-			node_port_line="#"
-			if [ -n "$reserved_extra_port" ]; then 
-				read -r -a reserved_extra_port_arr <<< "$reserved_extra_port"
-				reserved_port=${reserved_extra_port_arr[$i]}
-				# Check if somebody's using it
-				if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_port/ 2>/dev/null`" ]; then
-					if [ "$reserved_port" != 443 -a "$reserved_port" != 22 ]; then
-						node_port_line="nodePort: $reserved_port"
-					fi
-				else
-					echo "Requested port, $reserved_port, in use" >> "$logfile"
-				fi
-			fi
-			echo "---"
-			cat "$EXTRA_SERVICE_YAML_FILE" | \
-			sed "s|EXTRA_PORT|${pod_port}|g" | \
-			sed "s|nodePort: NODE_PORT|${node_port_line}|g" | \
-			yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
-			yq -r -y ".metadata.name=\"${pod_name}-extra-${pod_port}\"" |\
-			yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
-			i=$(($i+1))
-		done
-	fi
-	### NFS
-	if [[ -n "$nfs_storage_path" || -n "$nfs_files_path" ]]; then
-		### NFS volume
-		if [ -n "$create_nfs_volume" ]; then
-			echo "---"
-			cat "$NFS_VOLUME_YAML_FILE" | \
-			sed "s|NFS_VOLUME_NAME|${nfs_volume_name}|g" | \
-			sed "s|NFS_VOLUME_PATH|${nfs_volume_path}|g" | \
-			sed "s|NFS_ACCESS_MODE|${nfs_access_mode}|g" | \
-			sed "s|NFS_ACCESS|${nfs_access}|g" | \
-			sed "s|SERVER_IP|$home_server|g"
-		fi
-		### NFS persistent volume claim
-		if [ -n "$create_nfs_claim" ]; then
-			echo "---"
-			cat "$NFS_CLAIM_YAML_FILE" | \
-			sed "s|NFS_ACCESS_MODE|${nfs_access_mode}|g" | \
-			sed "s|NFS_VOLUME_NAME|${nfs_volume_name}|g" | \
-			sed "s|NFS_CLAIM_NAME|${nfs_claim_name}|g"
-		fi
-	fi
-	### Local volume
-	echo "Creating volumes $create_local_volume" >> "$logfile"
-	if [ -n "$create_local_volume" ]; then
-		while read lsp; do
-			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
-			echo "---"
-			cat "$LOCAl_VOLUME_YAML_FILE" | \
-			sed "s|LOCAL_VOLUME_NAME|local-${local_storage_name}|g" | \
-			sed "s|LOCAL_STORAGE_PATH|${lsp}|g" | \
-			sed "s|LOCAL_STORAGE_CLASS_NAME|manual-${local_storage_name}|g"
-		done <<< $(echo "$create_local_volume" | sed "s|,|\n|g")
-	fi
-	echo "Creating volumeclaims $create_local_claim" >> "$logfile"
-	### Local persistent volume claim
-	if [ -n "$create_local_claim" ]; then
-		while read lsp; do
-			local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
-			echo "---"
-			cat "$LOCAL_CLAIM_YAML_FILE" | \
-			sed "s|LOCAL_CLAIM_NAME|local-claim-${local_storage_name}|g" | \
-			sed "s|LOCAL_STORAGE_CLASS_NAME|manual-${local_storage_name}|g"
-		done <<< $(echo "$create_local_claim" | sed "s|,|\n|g")
-	fi
-	)
-	### End modify pod YAML
-
-	echo "YAML now: $modified_yaml" >> "$logfile"
-	
-	# Now apply the yaml and save the output of the kubectl command
-	if [[ -z "$dryrun" ]]; then
-		kubectl_output=$( kubectl apply -f - < <(echo "$modified_yaml") )
-	else
-		kubectl_output=$( kubectl apply --validate=true --dry-run=client -f - < <(echo "$modified_yaml") )
-	fi
-
-	echo "$kubectl_output" >> "$logfile"
-	# If it worked, there should be a line in the output like 'pod/jupyter... created'. In that case report success
-	regex='.*^pod/[^'$'\n'']+created$.*'
-	if [[ $kubectl_output =~ $regex ]]; then
-		echo "SUCCESS: $pod_name"
-		# begin background processes if required
-		if [[ -n "$pod_http_port" ]]; then
-			start_reverse_proxy >& /dev/null &
-		fi
-		exit 0
-	else
-		echo "FAILURE: kubectl did not create pod"
-		exit 1
-	fi
-else
-	echo "ERROR: Parsing .metadata.name from YAML failed" >&2
+### Find free SSH port and block access if requested
+### For some reason, our api-server is configured to assign nodePort in the range 3000 - 32767, NOT
+### 30000 - 21767. See https://www.baeldung.com/ops/kubernetes-nodeport-range
+### Anyway - for this we start at 30000
+active_ports=`kubectl  get services --all-namespaces | grep NodePort | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | sort -n`
+for ssh_port in {30000..32768}; do
+	echo $active_ports | grep -E "(^|\s+)$ssh_port(\s+|$)" >& /dev/null || break
+done
+if [[ -z "$ssh_port" || $ssh_port == 32768 ]]; then
+	echo "ERROR: No free SSH port found"
 	exit 2
 fi
+# Block SSH access for others than the current client IP
+if [ -n "$allowed_ip" ]; then
+	# Block access from everywhere
+	$run sudo iptables -t raw -A PREROUTING -p tcp --dport $ssh_port -j DROP
+	# Allow access from $allowed_ip
+	$run sudo iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
+fi
+
+### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
+modified_yaml=$( echo "$modified_yaml" | \
+yq -r "(.spec.containers[]?.env[]? | select(.name == \"SSH_PUBLIC_KEY\") | .value) |= \"$ssh_public_key\"" | \
+yq -r "(.spec.containers[]?.env[]? | select(.name == \"SD_UID\") | .value) |= \"$owner\"" | \
+yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$FILE\"" | \
+yq -r "(.spec.containers[]?.env[]? | select(.name == \"PEERS\") | .value) |= \"$PEERS\"" | \
+yq -r "(.spec.containers[]?.env[]? | select(.name == \"SETUP_SCRIPT\") | .value) |= \"$SETUP_SCRIPT\"" | \
+yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
+yq -r "(.spec.containers[]?.env[]? | select(.name == \"HTTPS_PORT\") | .value) |= \"$reverse_proxy_port\"" | \
+yq -r "(.spec.containers[]?.env[]? | select(.name == \"PUBLIC_HOME_SERVER\") | .value) |= \"$public_home_server\"" | \
+sed "s|HOME_SERVER/storage/mathpass|${my_home_server}/storage/mathpass|" | \
+yq -r -y ".metadata.name=\"$pod_name\"" |\
+yq -r -y ".metadata.labels.user=\"$user\"" | \
+yq -r -y ".metadata.labels.domain=\"$domain\"" |\
+yq -r -y ".metadata.labels.app=\"$pod_name\"" | \
+( [ -z "$pod_http_port" ] && cat || yq -r -y ".metadata.labels.reverseProxyPort=\"$reverse_proxy_port\"" ) |\
+( [ -z "$nfs_path" ] && cat || yq -r -y ".spec.volumes|= .+ [{\"name\":\"sciencedata\", \"persistentVolumeClaim\": {\"claimName\": \"${nfs_volume_name}\"}}]" ) #| \
+#sed "s|^      env:|${cmd_add}\n      env:|"
+### SSH service/port
+if [ -n "$ssh_public_key" ]; then
+	echo "---"
+	cat "$SSH_SERVICE_YAML_FILE"| \
+	yq -r -y ".spec.ports[].nodePort=$ssh_port" |\
+	yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
+	yq -r -y ".metadata.name=\"${pod_name}-ssh\"" | \
+	yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
+fi
+### Extra service/port
+if [ -n "$pod_extra_port" ]; then
+	i=0
+	# We assume $pod_extra_port is a space-separated list. Just one is fine.
+	# Notice that if e.g. POD_EXTRA_PORT is set to "3483 9000" in the pod YAML,
+	# a matching entry in /usr/local/etc/pod_extra_ports.txt also has to have 2 entries, e.g.
+	# ubuntu-noble-lyrion-fror-dtu-dk:3483 9000
+	for pod_port in $pod_extra_port; do
+		# Look for a match in $EXTRA_PORTS_FILE. If found, assign nodePort to this - unless
+		# there's already a pod running with this port assigned.
+		if [ -n "`grep ^$pod_name: $EXTRA_PORTS_FILE 2>/dev/null`" ]; then
+			reserved_extra_port=`grep ^$pod_name: $EXTRA_PORTS_FILE | awk -F: '{print $NF}'`
+		fi
+		if [ -n "`grep ^$pod_base_name: $EXTRA_PORTS_FILE 2>/dev/null`" ]; then
+			reserved_extra_port=`grep ^$pod_base_name: $EXTRA_PORTS_FILE | awk -F: '{print $NF}'`
+		fi
+		node_port_line="#"
+		if [ -n "$reserved_extra_port" ]; then 
+			read -r -a reserved_extra_port_arr <<< "$reserved_extra_port"
+			reserved_port=${reserved_extra_port_arr[$i]}
+			# Check if somebody's using it
+			if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_port/ 2>/dev/null`" ]; then
+				if [ "$reserved_port" != 443 -a "$reserved_port" != 22 ]; then
+					node_port_line="nodePort: $reserved_port"
+				fi
+			else
+				echo "Requested port, $reserved_port, in use" >> "$logfile"
+			fi
+		fi
+		echo "---"
+		cat "$EXTRA_SERVICE_YAML_FILE" | \
+		sed "s|EXTRA_PORT|${pod_port}|g" | \
+		sed "s|nodePort: NODE_PORT|${node_port_line}|g" | \
+		yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
+		yq -r -y ".metadata.name=\"${pod_name}-extra-${pod_port}\"" |\
+		yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
+		i=$(($i+1))
+	done
+fi
+### NFS
+if [[ -n "$nfs_storage_path" || -n "$nfs_files_path" ]]; then
+	### NFS volume
+	if [ -n "$create_nfs_volume" ]; then
+		echo "---"
+		cat "$NFS_VOLUME_YAML_FILE" | \
+		sed "s|NFS_VOLUME_NAME|${nfs_volume_name}|g" | \
+		sed "s|NFS_VOLUME_PATH|${nfs_volume_path}|g" | \
+		sed "s|NFS_ACCESS_MODE|${nfs_access_mode}|g" | \
+		sed "s|NFS_ACCESS|${nfs_access}|g" | \
+		sed "s|SERVER_IP|$home_server|g"
+	fi
+	### NFS persistent volume claim
+	if [ -n "$create_nfs_claim" ]; then
+		echo "---"
+		cat "$NFS_CLAIM_YAML_FILE" | \
+		sed "s|NFS_ACCESS_MODE|${nfs_access_mode}|g" | \
+		sed "s|NFS_VOLUME_NAME|${nfs_volume_name}|g" | \
+		sed "s|NFS_CLAIM_NAME|${nfs_claim_name}|g"
+	fi
+fi
+### Local volume
+echo "Creating volumes $create_local_volume" >> "$logfile"
+if [ -n "$create_local_volume" ]; then
+	while read lsp; do
+		local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
+		echo "---"
+		cat "$LOCAl_VOLUME_YAML_FILE" | \
+		sed "s|LOCAL_VOLUME_NAME|local-${local_storage_name}|g" | \
+		sed "s|LOCAL_STORAGE_PATH|${lsp}|g" | \
+		sed "s|LOCAL_STORAGE_CLASS_NAME|manual-${local_storage_name}|g"
+	done <<< $(echo "$create_local_volume" | sed "s|,|\n|g")
+fi
+echo "Creating volumeclaims $create_local_claim" >> "$logfile"
+### Local persistent volume claim
+if [ -n "$create_local_claim" ]; then
+	while read lsp; do
+		local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
+		echo "---"
+		cat "$LOCAL_CLAIM_YAML_FILE" | \
+		sed "s|LOCAL_CLAIM_NAME|local-claim-${local_storage_name}|g" | \
+		sed "s|LOCAL_STORAGE_CLASS_NAME|manual-${local_storage_name}|g"
+	done <<< $(echo "$create_local_claim" | sed "s|,|\n|g")
+fi
+)
+### End modify pod YAML
+
+echo "YAML now: $modified_yaml" >> "$logfile"
+
+# Now apply the yaml and save the output of the kubectl command
+if [[ -z "$dryrun" ]]; then
+	kubectl_output=$( kubectl apply -f - < <(echo "$modified_yaml") )
+else
+	kubectl_output=$( kubectl apply --validate=true --dry-run=client -f - < <(echo "$modified_yaml") )
+fi
+
+echo "$kubectl_output" >> "$logfile"
+# If it worked, there should be a line in the output like 'pod/jupyter... created'. In that case report success
+regex='.*^pod/[^'$'\n'']+created$.*'
+if [[ $kubectl_output =~ $regex ]]; then
+	echo "SUCCESS: $pod_name"
+	# begin background processes if required
+	if [[ -n "$pod_http_port" ]]; then
+		start_reverse_proxy >& /dev/null &
+	fi
+	exit 0
+else
+	echo "FAILURE: kubectl did not create pod"
+	exit 1
+fi
+

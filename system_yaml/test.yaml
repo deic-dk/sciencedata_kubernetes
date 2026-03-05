@@ -1,0 +1,95 @@
+kind: Pod
+metadata:
+  name: jupyter-fror-dtu-dk-1
+  labels:
+    user: fror
+    domain: dtu.dk
+    app: jupyter-fror-dtu-dk-1
+    reverseProxyPort: '2004'
+spec:
+  containers:
+    - name: jupyter
+      image: sciencedata/jupyter_sciencedata_custom:1.1
+      ports:
+        - containerPort: 8888
+          protocol: TCP
+      env:
+        - name: HOME_SERVER
+          value: 10.2.0.15
+        - name: SD_UID
+          value: fror@dtu.dk
+        - name: SETUP_SCRIPT
+          value: /cvmfs/sft.cern.ch/lcg/views/LCG_104/x86_64-ubuntu2004-gcc9-opt/setup.sh
+        - name: CVMFS_REPOS
+          value: atlas.cern.ch,atlas-condb.cern.ch,grid.cern.ch,unpacked.cern.ch,sft.cern.ch
+        - name: POD_HTTP_PORT
+          value: '8888'
+        - name: FILE
+          value: ''
+      securityContext:
+        capabilities:
+          add:
+            - SYS_CHROOT
+            - AUDIT_WRITE
+            - NET_ADMIN
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: local-claim--cvmfs-atlas-cern-ch # will be configured by run_pod
+spec:
+  storageClassName: manual--cvmfs-atlas-cern-ch # will be configured by run_pod
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 10Gi
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: local-claim--cvmfs-atlas-condb-cern-ch # will be configured by run_pod
+spec:
+  storageClassName: manual--cvmfs-atlas-condb-cern-ch # will be configured by run_pod
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 10Gi
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: local-claim--cvmfs-grid-cern-ch # will be configured by run_pod
+spec:
+  storageClassName: manual--cvmfs-grid-cern-ch # will be configured by run_pod
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 10Gi
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: local-claim--cvmfs-unpacked-cern-ch # will be configured by run_pod
+spec:
+  storageClassName: manual--cvmfs-unpacked-cern-ch # will be configured by run_pod
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 10Gi
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: local-claim--cvmfs-sft-cern-ch # will be configured by run_pod
+spec:
+  storageClassName: manual--cvmfs-sft-cern-ch # will be configured by run_pod
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 10Gi
+
