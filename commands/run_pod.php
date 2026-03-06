@@ -32,7 +32,7 @@ $peers = empty($_GET['peers'])?"":$_GET['peers']; // Pod peers of the form host1
 $setup_script = empty($_GET['setup_script'])?"":$_GET['setup_script']; // Setup script to run open inside pod
 $yaml_url = $_GET['yaml_url']; // URL of the YAML file to apply - read using the supplied user ID if it starts with
 															// /shared/, /files/, /group/, /sharingin/, /storage/, otherwise read with admin privileges (system/app file).
-$pod_type = empty($_GET['type'])?"":$_GET['type']; // Pod peers of the form host1:ip1,host2:ip2,...
+$pod_type = empty($_GET['pod_type'])?"":$_GET['pod_type']; // Pod peers of the form host1:ip1,host2:ip2,...
 
 if(empty($owner)){
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);

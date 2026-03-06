@@ -464,34 +464,33 @@ modified_yaml=$( ( yq -r -y ".spec.enableServiceLinks = false" ) <<< "$modified_
 
 ### Add memory and CPU limits
 if [[ -n "$pod_type" ]]; then
-	modified_yaml=$( ( yq -r -y ".metadata.labels.type = $pod_type" ) <<< "$modified_yaml" )
-	if [[ "$pod_type" == "small"; then
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.memory = \"128Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.cpu = \"125m\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.memory = \"256Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.cpu = \"250m\"" ) <<< "$modified_yaml" )
+	if [[ "$pod_type" == "small" ]]; then
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"128Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"125m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"256Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"250m\"" ) <<< "$modified_yaml" )
 	fi
 	if [[ "$pod_type" == "medium" || "$pod_type" == "gpu1" || "$pod_type" == "gpu4" ]]; then
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.memory = \"256Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.cpu = \"250m\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.memory = \"512Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.cpu = \"500m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"256Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"250m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"512Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"500m\"" ) <<< "$modified_yaml" )
 	fi
 	if [[ "$pod_type" == "large" ]]; then
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.memory = \"1024Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.requests.cpu = \"500m\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.memory = \"4096Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.cpu = \"2000m\"" ) <<< "$modified_yaml" )	
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"1024Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"500m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"4096Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"2000m\"" ) <<< "$modified_yaml" )	
 	fi
 	if [[ "$pod_type" == "gpu1" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.runtimeClassName = nvidia" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.nvidia.com/gpu = 1" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.nvidia.com/gpu = 1" ) <<< "$modified_yaml" )
 		modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= 1" ) <<< "$modified_yaml" )
 		
 	fi
 	if [[ "$pod_type" == "gpu4" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.runtimeClassName = nvidia" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers.resources.limits.nvidia.com/gpu = 4" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.nvidia.com/gpu = 4" ) <<< "$modified_yaml" )
 		modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= 4" ) <<< "$modified_yaml" )
 	fi
 fi

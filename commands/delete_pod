@@ -148,7 +148,7 @@ remove_ssh_firewall_rules() {
 		$run sudo iptables $cmd
 	done
 	
-	# Delete nat ACCEPT rules for this port
+	# Delete ACCEPT rules for this port
 	# E.g. iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
 	sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $ssh_port" | while read line; do
 		allowed_ip=`echo $line | sed -E 's|.* -s (\S+) .*|\1|'`
@@ -165,6 +165,7 @@ remove_persistent_volumes &>> "$logfile" &
 
 # Now we can delete the pod
 echo "INFO: Deleting pod $pod_name" >> "$logfile"
+remove_ssh_firewall_rules >> "$logfile"
 $run kubectl delete pod "$pod_name" &>> "$logfile" &
 
 # start slow process
