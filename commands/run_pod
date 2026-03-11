@@ -280,20 +280,46 @@ if [ -z "$pod_extra_port" ]; then
 	fi
 fi
 
-yaml_user=`cat \"$yaml_file\" | yq -r -y ".metadata.labels.user"`
-yaml_domain=`cat \"$yaml_file\" | yq -r -y ".metadata.labels.domain"`
+yaml_user=`cat "$yaml_file" | yq -r ".metadata.labels.user"`
+yaml_domain=`cat "$yaml_file" | yq -r ".metadata.labels.domain"`
+yaml_group=`cat "$yaml_file" | yq -r ".metadata.labels.group" | jq -SRr @uri`
 
 user=`echo $owner | awk -F@ '{print $1}'`
 domain=`echo $owner | awk -F@ '{print $2}'`
 owner_str=`echo $owner | sed 's|[@._]|-|g'`
 
-if [[ "$yaml_user" != "" && "$yaml_user" != "$user" ]]; then
-	echo "ERROR: Not allowed, $yaml_user != $user"  >&2
-	exit -1
+user_allowed=1
+
+if [[ ( "$yaml_user" == "" || "$yaml_user" == "null" ) && ( "$yaml_domain" == "" ||  "$yaml_domain" == "null" ) && ( "$yaml_group" != "" || "$yaml_group" != "null" ) ]]; then
+	echo "Allowed >> "$logfile"
+	user_allowed=0
 fi
 
-if [[ "$yaml_domain" != "" && "$yaml_domain" != "$domain" ]]; then
-	echo "ERROR: Not allowed, $yaml_domain != $domain"  >&2
+if [[ ( "$yaml_domain" == "" ||  "$yaml_domain" == "null" ) && "$yaml_user" != "" && "$yaml_user" != "null" && "$yaml_user" == "$user" ]]; then
+	echo "Allowed system user $yaml_user == $user" >> "$logfile"
+	user_allowed=0
+fi
+
+if [[ ( "$yaml_user" == "" || "$yaml_user" == "null" ) && "$yaml_domain" != "" && "$yaml_domain" != "null" && "$yaml_domain" == "$domain" ]]; then
+	echo "Allowed domain $yaml_domain == $domain" >> "$logfile"
+	user_allowed=0
+fi
+
+if [[ "$yaml_domain" != "" && "$yaml_domain" != "null" && "$yaml_domain" == "$domain" && "$yaml_user" != "" && "$yaml_user" != "null" && "$yaml_user" == "$user" ]]; then
+	echo "Allowed regular user $yaml_user == $user" >> "$logfile"
+	user_allowed=0
+fi
+
+if [[ "$user_allowed" == 1 && "$yaml_group" != "" && "$yaml_group" != "null" ]]; then
+	gstatus=`curl --insecure "https://${SCIENCEDATA_IP}/remote.php/groupadmin?action=isMember&group=${yaml_group}&member=${owner}" | jq -r .status`
+	if [[ "$gstatus" == "success" ]]; then
+		echo "Allowed group user $owner - as member of $yaml_group" >> "$logfile"
+		user_allowed=0
+	fi
+fi
+
+if [[ "$user_allowed" == 1 ]]; then
+	echo "User $user not allowed  >> "$logfile"
 	exit -1
 fi
 
