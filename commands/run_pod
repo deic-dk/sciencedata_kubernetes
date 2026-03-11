@@ -291,7 +291,7 @@ owner_str=`echo $owner | sed 's|[@._]|-|g'`
 user_allowed=1
 
 if [[ ( "$yaml_user" == "" || "$yaml_user" == "null" ) && ( "$yaml_domain" == "" ||  "$yaml_domain" == "null" ) && ( "$yaml_group" != "" || "$yaml_group" != "null" ) ]]; then
-	echo "Allowed >> "$logfile"
+	echo "Allowed" >> "$logfile"
 	user_allowed=0
 fi
 
@@ -313,13 +313,13 @@ fi
 if [[ "$user_allowed" == 1 && "$yaml_group" != "" && "$yaml_group" != "null" ]]; then
 	gstatus=`curl --insecure "https://${SCIENCEDATA_IP}/remote.php/groupadmin?action=isMember&group=${yaml_group}&member=${owner}" | jq -r .status`
 	if [[ "$gstatus" == "success" ]]; then
-		echo "Allowed group user $owner - as member of $yaml_group" >> "$logfile"
+		echo "Allowed group user $owner as member of $yaml_group" >> "$logfile"
 		user_allowed=0
 	fi
 fi
 
 if [[ "$user_allowed" == 1 ]]; then
-	echo "User $user not allowed  >> "$logfile"
+	echo "User $user not allowed"  >> "$logfile"
 	exit -1
 fi
 
@@ -527,7 +527,7 @@ fi
 
 ### Add user public key to authorized_keys
 if [ -n "$ssh_public_key" ]; then
-cmd="eval home=~$username \&\& ( ls \$home/.ssh || mkdir \$home/.ssh ) \&\& echo \\\\\"$ssh_public_key\\\\\" >> \$home/.ssh/authorized_keys \&\& chown -R \$username \$home/.ssh \&\& chmod -R go-rw \$home/.ssh"
+	cmd="eval home=~$username \&\& ( ls \$home/.ssh || mkdir \$home/.ssh ) \&\& echo \\\\\"$ssh_public_key\\\\\" >> \$home/.ssh/authorized_keys \&\& chown -R $username \$home/.ssh \&\& chmod -R go-rw \$home/.ssh"
 fi
 
 ### Add $allowed_ip to hosts.allow
