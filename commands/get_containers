@@ -4,8 +4,12 @@ logfile='/var/log/kube.log'
 TMPDIR="/tmp"
 now_seconds=`date +"%s"`
 
+HTTPS_PORTS_FILE="/usr/local/etc/kube/pod_https_ports.txt"
+EXTRA_PORTS_FILE="/usr/local/etc/kube/pod_extra_ports.txt"
+SSH_PORTS_FILE="/usr/local/etc/kube/pod_ssh_ports.txt"
+
 echo "###" >&2
-echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri|extra_ports|allowed_ips" >&2
+echo "pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri|extra_ports|allowed_ips|keep_ports" >&2
 echo "###" >&2
 
 owner="$@"
@@ -24,6 +28,19 @@ function getService(){
 	name=$1
 	namespaces=`kubectl get namespaces | grep -E -v 'kube\-|NAME' | awk '{print $1}' | tr '\n' ' '`
 	for namespace in $namespaces; do kubectl get service -o json $name --namespace $namespace 2>/dev/null; done
+}
+
+# If just one entry has been made in either HTTPS_PORTS_FILE, EXTRA_PORTS_FILE or SSH_PORTS_FILE, we assume
+# "keep port number(s)" has been checked
+function getKeepPorts(){
+	name=$1
+	if [ -n "`grep ^$name: $HTTPS_PORTS_FILE 2>/dev/null`" ]; then
+		echo 1
+	elif [ -n "`grep ^$name: $SSH_PORTS_FILE 2>/dev/null`" ]; then
+		echo 1
+	else
+		echo 0
+	fi
 }
 
 echo $(kubectl get pods ${labels:+"$labels"} --all-namespaces -o json) |\
@@ -78,7 +95,8 @@ echo $(kubectl get pods ${labels:+"$labels"} --all-namespaces -o json) |\
         extra_ports=`kubectl get service --all-namespaces | grep "${pod_name}\-extra" 2>/dev/null | sed -E 's|^.+-([0-9]+) +.+ +[0-9]+:([0-9]+)/.+|\1:\2|'`
         extra_ports=`echo $extra_ports | sed 's| |,|g'`
         uri=`cat ${TMPDIR}/uri-${pod_name} 2>/dev/null`
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" \
+        keep_ports=`getKeepPorts $pod_name`
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "${array[0]}" "${array[1]}" "${array[2]}" \
         "${array[3]}" "${array[4]}" "$owner" "$diff_seconds" "$state:$status" "$ssh_port" "${array[11]}" \
-        "${array[12]}" "$uri" "$extra_ports" "$allowed_ips"
+        "${array[12]}" "$uri" "$extra_ports" "$allowed_ips" "$keep_ports"
 done

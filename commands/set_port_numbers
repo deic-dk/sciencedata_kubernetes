@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# set_port_numbers $pod_name $allowed_ip
+
+user=""
+run=""
+logfile='/var/log/kube.log'
+TMPDIR="/tmp"
+
+HTTPS_PORTS_FILE="/usr/local/etc/kube/pod_https_ports.txt"
+SSH_PORTS_FILE="/usr/local/etc/kube/pod_ssh_ports.txt"
+
+while getopts "u:w:s:d" flag; do
+	case "$flag" in
+		u)
+			user=$OPTARG
+			;;
+		w)
+			https_port=$OPTARG
+			;;
+		s)
+			ssh_port=$OPTARG
+			;;
+		d)
+			run="echo"
+			;;
+		\?)
+			echo "Invalid option: -$OPTARG" >&2
+			exit 1
+		;;
+		:)
+			echo "Option -$OPTARG requires an argument." >&2
+			exit 1
+		;;
+	esac
+done
+
+shift "$((OPTIND-1))"
+pod_name=$1 # name of pod
+
+if [[ -z "$pod_name" ]]; then
+	echo "Usage:  set_port_numbers [-w https_port] [-s ssh_port] pod_name" >&2
+	exit 1
+fi
+
+sed -i -E "/^$pod_name:/d" "$HTTPS_PORTS_FILE"
+if [ -n "$https_port" ]; then
+	if [[ ! `grep ":$https_port$" "$HTTPS_PORTS_FILE"` ]]; then
+		echo "Setting HTTPS port $https_port for $pod_name" >> $logfile
+		$run echo "$pod_name:$https_port" >> "$HTTPS_PORTS_FILE"
+	else
+		echo "HTTPS port $https_port already taken" | tee $logfile
+		exit 1
+	fi
+fi
+
+sed -i -E "/^$pod_name:/d" "$SSH_PORTS_FILE"
+if [ -n "$ssh_port" ]; then
+	if [[ ! `grep ":$https_port$" "$SSH_PORTS_FILE"` ]]; then
+		echo "Setting SSH port $ssh_port for $pod_name" >> $logfile
+		$run echo "$pod_name:$ssh_port" >> "$SSH_PORTS_FILE"
+	else
+		echo "SSH port $ssh_port already taken" | tee $logfile
+		exit 1	
+	fi
+fi
+
+
+

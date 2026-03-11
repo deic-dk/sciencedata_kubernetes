@@ -12,7 +12,7 @@ spec:
     ## on kube are forwarded
     ## to the first pod. I.e. if we set it to 22, we can no longer
     ## ssh to kube. Thus we set it randomly to 3483.
-    # nodePort will be configured by run_pod if there's a reserved port in /usr/local/etc/pod_extra_ports.txt
+    # nodePort will be configured by run_pod if there's a reserved port in /usr/local/etc/kube/pod_extra_ports.txt
     # targetPort will be configured by run_pod from POD_EXTRA_PORT in the YAML
   - port: 3483
     nodePort: NODE_PORT

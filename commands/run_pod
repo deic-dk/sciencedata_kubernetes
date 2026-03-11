@@ -50,8 +50,9 @@ LOCAl_VOLUME_YAML_FILE="$DIR/../service_manifests/local_volume.yaml"
 LOCAL_CLAIM_YAML_FILE="$DIR/../service_manifests/local_claim.yaml"
 CADDY_FILE="$DIR/../service_manifests/Caddyfile"
 TMPDIR="/tmp"
-HTTPS_PORTS_FILE="/usr/local/etc/pod_https_ports.txt"
-EXTRA_PORTS_FILE="/usr/local/etc/pod_extra_ports.txt"
+HTTPS_PORTS_FILE="/usr/local/etc/kube/pod_https_ports.txt"
+EXTRA_PORTS_FILE="/usr/local/etc/kube/pod_extra_ports.txt"
+SSH_PORTS_FILE="/usr/local/etc/kube/pod_ssh_ports.txt"
 
 yaml_file=""
 owner=""
@@ -409,12 +410,12 @@ if [[ -n $pod_http_port ]]; then
 	# Look for a match in $HTTPS_PORTS_FILE. If found, assign nodePort to this - unless
 	# there's already a pod running with this port assigned.
 	echo "Looking for $pod_name: in $HTTPS_PORTS_FILE " >> "$logfile"
-	if [ -n "`grep ^$pod_name: $HTTPS_PORTS_FILE 2>/dev/null`" ]; then
-		if [ -n "`grep ^$pod_name: $HTTPS_PORTS_FILE 2>/dev/null`" ]; then
-			reserved_https_port=`grep ^$pod_name: $HTTPS_PORTS_FILE | awk -F: '{print $NF}'`
+	if [ -n "`grep -E "^$pod_base_name[:-]" "$HTTPS_PORTS_FILE" 2>/dev/null`" ]; then
+		if [ -n "`grep ^$pod_name: "$HTTPS_PORTS_FILE" 2>/dev/null`" ]; then
+			reserved_https_port=`grep ^$pod_name: "$HTTPS_PORTS_FILE" | awk -F: '{print $NF}'`
 		fi
-		if [ -n "`grep ^$pod_base_name: $HTTPS_PORTS_FILE 2>/dev/null`" ]; then
-			reserved_https_port=`grep ^$pod_base_name: $HTTPS_PORTS_FILE | awk -F: '{print $NF}'`
+		if [ -n "`grep ^$pod_base_name: "$HTTPS_PORTS_FILE" 2>/dev/null`" ]; then
+			reserved_https_port=`grep ^$pod_base_name: "$HTTPS_PORTS_FILE" | awk -F: '{print $NF}'`
 		fi
 		# Check if somebody's using it
 		if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_https_port/ 2>/dev/null`" ]; then
@@ -426,6 +427,8 @@ if [[ -n $pod_http_port ]]; then
 		fi
 	else
 		for reverse_proxy_port in {2000..3000}; do
+			# Check if somebody's reserved it
+			grep ":$reverse_proxy_port$" "$HTTPS_PORTS_FILE" >&/dev/null && continue 
 			ps aux | grep "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-" >& /dev/null || break
 			ps auxw | grep caddy | grep -v "/etc/caddy/Caddyfile" | grep -v grep | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-.*-${reverse_proxy_port}" >&/dev/null || break
 		done
@@ -519,24 +522,53 @@ fi
 #)
 #fi
 
-### Find free SSH port and block access if requested
-### For some reason, our api-server is configured to assign nodePort in the range 3000 - 32767, NOT
-### 30000 - 21767. See https://www.baeldung.com/ops/kubernetes-nodeport-range
-### Anyway - for this we start at 30000
-active_ports=`kubectl  get services --all-namespaces | grep NodePort | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | sort -n`
-for ssh_port in {30000..32768}; do
-	echo $active_ports | grep -E "(^|\s+)$ssh_port(\s+|$)" >& /dev/null || break
-done
-if [[ -z "$ssh_port" || $ssh_port == 32768 ]]; then
-	echo "ERROR: No free SSH port found"
-	exit 2
-fi
-# Block SSH access for others than the current client IP
-if [ -n "$allowed_ip" ]; then
-	# Block access from everywhere
-	$run sudo iptables -t raw -A PREROUTING -p tcp --dport $ssh_port -j DROP
-	# Allow access from $allowed_ip
-	$run sudo iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
+### Find free port for SSH proxy and block access if requested
+
+if [[ -n $ssh_public_key ]]; then
+	# Look for a match in $SSH_PORTS_FILE. If found, assign pod_ssh_port to this - unless
+	# there's already a pod running with this port assigned.
+	echo "Looking for $pod_name: in $SSH_PORTS_FILE " >> "$logfile"
+	if [ -n "`grep -E "^$pod_base_name[:-]" "$SSH_PORTS_FILE" 2>/dev/null`" ]; then
+		if [ -n "`grep ^$pod_name: "$SSH_PORTS_FILE" 2>/dev/null`" ]; then
+			reserved_ssh_port=`grep ^$pod_name: "$SSH_PORTS_FILE" | awk -F: '{print $NF}'`
+		fi
+		if [ -n "`grep ^$pod_base_name: "$SSH_PORTS_FILE" 2>/dev/null`" ]; then
+			reserved_ssh_port=`grep ^$pod_base_name: "$SSH_PORTS_FILE" | awk -F: '{print $NF}'`
+		fi
+		# Check if somebody's using it
+		if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_ssh_port/ 2>/dev/null`" ]; then
+			if [ "$reserved_ssh_port" != 443 -a "$reserved_ssh_port" != 22 ]; then
+				reverse_proxy_port=$reserved_https_port
+			fi
+		else
+			echo "Requested port, $reserved_ssh_port, in use" >> "$logfile"
+		fi
+	fi
+	if [[ -n "$reserved_ssh_port" ]]; then
+		ssh_port=$reserved_ssh_port
+	else
+		### For some reason, our api-server is configured to assign nodePort in the range 3000 - 32767, NOT
+		### 30000 - 21767. See https://www.baeldung.com/ops/kubernetes-nodeport-range
+		### Anyway - for this we start at 30000
+		active_ports=`kubectl  get services --all-namespaces | grep NodePort | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | sort -n`
+		# Check if someone's using/blocking it
+		for ssh_port in {30000..32768}; do
+			# Check if somebody's reserved it
+			grep ":$ssh_port$" "$SSH_PORTS_FILE" >&/dev/null && continue 
+			echo $active_ports | grep -E "(^|\s+)$ssh_port(\s+|$)" >& /dev/null || break
+		done
+		if [[ -z "$ssh_port" || $ssh_port == 32768 ]]; then
+			echo "ERROR: No free SSH port found"
+			exit 2
+		fi
+	fi
+	# Block SSH access for others than the current client IP
+	if [[ -n "$allowed_ip" && -n "$ssh_port" ]]; then
+		# Block access from everywhere
+		$run sudo iptables -t raw -A PREROUTING -p tcp --dport $ssh_port -j DROP
+		# Allow access from $allowed_ip
+		$run sudo iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
+	fi
 fi
 
 ### Modify pod YAML - ssh public key, metadata, volume. Pass the env variable FILE on.
@@ -571,16 +603,16 @@ if [ -n "$pod_extra_port" ]; then
 	i=0
 	# We assume $pod_extra_port is a space-separated list. Just one is fine.
 	# Notice that if e.g. POD_EXTRA_PORT is set to "3483 9000" in the pod YAML,
-	# a matching entry in /usr/local/etc/pod_extra_ports.txt also has to have 2 entries, e.g.
+	# a matching entry in /usr/local/etc/kube/pod_extra_ports.txt also has to have 2 entries, e.g.
 	# ubuntu-noble-lyrion-fror-dtu-dk:3483 9000
 	for pod_port in $pod_extra_port; do
 		# Look for a match in $EXTRA_PORTS_FILE. If found, assign nodePort to this - unless
 		# there's already a pod running with this port assigned.
-		if [ -n "`grep ^$pod_name: $EXTRA_PORTS_FILE 2>/dev/null`" ]; then
-			reserved_extra_port=`grep ^$pod_name: $EXTRA_PORTS_FILE | awk -F: '{print $NF}'`
+		if [ -n "`grep ^$pod_name: "$EXTRA_PORTS_FILE" 2>/dev/null`" ]; then
+			reserved_extra_port=`grep ^$pod_name: "$EXTRA_PORTS_FILE" | awk -F: '{print $NF}'`
 		fi
-		if [ -n "`grep ^$pod_base_name: $EXTRA_PORTS_FILE 2>/dev/null`" ]; then
-			reserved_extra_port=`grep ^$pod_base_name: $EXTRA_PORTS_FILE | awk -F: '{print $NF}'`
+		if [ -n "`grep ^$pod_base_name: "$EXTRA_PORTS_FILE" 2>/dev/null`" ]; then
+			reserved_extra_port=`grep ^$pod_base_name: "$EXTRA_PORTS_FILE" | awk -F: '{print $NF}'`
 		fi
 		node_port_line="#"
 		if [ -n "$reserved_extra_port" ]; then 
