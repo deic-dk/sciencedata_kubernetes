@@ -12,7 +12,8 @@ $_GET = array_map(function($x){return escapeshellcmd($x);}, $_GET);
 $owner = $_GET['user_id']; // ID of the user logged into ScienceData
 $pod = $_GET['pod']; // Name of the pod
 $https_port = $_GET['https_port']; // HTTPS port
-$ssh_port = $_GET['ssh_ports']; // SSH ports
+$ssh_port = $_GET['ssh_port']; // SSH port
+$extra_ports = $_GET['extra_ports']; // SSH ports
 
 $output = null;
 $retval = null;
@@ -23,7 +24,7 @@ if(empty($owner) || empty($pod) || empty($owner)){
 	exit;
 }
 
-exec('export KUBECONFIG=/etc/kubernetes/admin.conf; set_port_numbers -u "'.$owner.'"  -w "'.$https_port.'" -s "'.$ssh_port.'" "'.$pod.'"', $output, $retval);
+exec('export KUBECONFIG=/etc/kubernetes/admin.conf; set_port_numbers -u "'.$owner.'"  -w "'.$https_port.'" -s "'.$ssh_port.'" -x "'.$extra_ports.'" "'.$pod.'"', $output, $retval);
 
 if($retval===0){
 	echo "{\"data\":{\"name\":\"$pod\", ".

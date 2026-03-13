@@ -157,7 +157,7 @@ while getopts "o:s:k:i:t:r:f:l:m:p:x:d" flag; do
 			# the port that will be proxied to (both TCP and UDP).
 			# The assigned external port can be inspected after boot.
 			# A space-separated list of port numbers is allowed
-			pod_extra_port=$OPTARG
+			pod_extra_ports=$OPTARG
 			;;
 		d)
 			# If set, no actions are performed, only reported
@@ -271,12 +271,12 @@ if [ -z "$pod_http_port" ]; then
 	fi
 fi
 
-if [ -z "$pod_extra_port" ]; then
+if [ -z "$pod_extra_ports" ]; then
 	# No extra port given on stdin, try getting it from env
-	pod_extra_port="$POD_EXTRA_PORT"
-	if [ -z "$pod_extra_port" ]; then
+	pod_extra_ports="$POD_EXTRA_PORTS"
+	if [ -z "$pod_extra_ports" ]; then
 		# Try getting extra port from yaml
-		pod_extra_port="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"POD_EXTRA_PORT\") | .value'`"
+		pod_extra_ports="`cat \"$yaml_file\" | yq -r '.spec.containers[]?.env[]? | select(.name == \"POD_EXTRA_PORTS\") | .value'`"
 	fi
 fi
 
@@ -577,11 +577,11 @@ if [[ -n $ssh_public_key ]]; then
 		### 30000 - 21767. See https://www.baeldung.com/ops/kubernetes-nodeport-range
 		### Anyway - for this we start at 30000
 		active_ports=`kubectl  get services --all-namespaces | grep NodePort | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | sort -n`
-		# Check if someone's using/blocking it
 		for ssh_port in {30000..32768}; do
-			# Check if somebody's reserved it
+			# Check if somebody's reserved or using it
 			grep ":$ssh_port$" "$SSH_PORTS_FILE" >&/dev/null && continue 
-			echo $active_ports | grep -E "(^|\s+)$ssh_port(\s+|$)" >& /dev/null || break
+			echo $active_ports | grep -E "(^|\s+)$ssh_port(\s+|$)" >& /dev/null && continue
+			break
 		done
 		if [[ -z "$ssh_port" || $ssh_port == 32768 ]]; then
 			echo "ERROR: No free SSH port found"
@@ -625,38 +625,72 @@ if [ -n "$ssh_public_key" ]; then
 	yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"
 fi
 ### Extra service/port
-if [ -n "$pod_extra_port" ]; then
+if [ -n "$pod_extra_ports" ]; then
 	i=0
-	# We assume $pod_extra_port is a space-separated list. Just one is fine.
-	# Notice that if e.g. POD_EXTRA_PORT is set to "3483 9000" in the pod YAML,
+	# We assume $pod_extra_ports is a space-separated list. Just one is fine.
+	# Notice that if e.g. POD_EXTRA_PORTS is set to "3483 9000" in the pod YAML,
 	# a matching entry in /usr/local/etc/kube/pod_extra_ports.txt also has to have 2 entries, e.g.
 	# ubuntu-noble-lyrion-fror-dtu-dk:3483 9000
-	for pod_port in $pod_extra_port; do
+	# This is set of $pod_extra_ports that are not already taken or reserved by others with those that are replaced by untaken ones
+	final_pod_extra_ports=""
+	for pod_port in $pod_extra_ports; do
 		# Look for a match in $EXTRA_PORTS_FILE. If found, assign nodePort to this - unless
 		# there's already a pod running with this port assigned.
 		if [ -n "`grep ^$pod_name: "$EXTRA_PORTS_FILE" 2>/dev/null`" ]; then
-			reserved_extra_port=`grep ^$pod_name: "$EXTRA_PORTS_FILE" | awk -F: '{print $NF}'`
+			reserved_extra_ports=`grep ^$pod_name: "$EXTRA_PORTS_FILE" | awk -F: '{print $NF}'`
 		fi
 		if [ -n "`grep ^$pod_base_name: "$EXTRA_PORTS_FILE" 2>/dev/null`" ]; then
-			reserved_extra_port=`grep ^$pod_base_name: "$EXTRA_PORTS_FILE" | awk -F: '{print $NF}'`
+			reserved_extra_ports=`grep ^$pod_base_name: "$EXTRA_PORTS_FILE" | awk -F: '{print $NF}'`
 		fi
-		node_port_line="#"
-		if [ -n "$reserved_extra_port" ]; then 
-			read -r -a reserved_extra_port_arr <<< "$reserved_extra_port"
-			reserved_port=${reserved_extra_port_arr[$i]}
+		node_port_line=""
+		if [ -n "$reserved_extra_ports" ]; then 
+			read -r -a reserved_extra_ports_arr <<< "$reserved_extra_ports"
+			reserved_port=${reserved_extra_ports_arr[$i]}
 			# Check if somebody's using it
 			if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_port/ 2>/dev/null`" ]; then
 				if [ "$reserved_port" != 443 -a "$reserved_port" != 22 ]; then
+					node_port=$reserved_port
 					node_port_line="nodePort: $reserved_port"
 				fi
 			else
 				echo "Requested port, $reserved_port, in use" >> "$logfile"
 			fi
 		fi
+		
+		if [[ -z "$node_port_line" ]]; then
+			active_ports=`kubectl  get services --all-namespaces | grep NodePort | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | sort -n`
+			for node_port in {30000..32768}; do
+				# Don't use the SSH port
+				if [ "$node_port" == "$ssh_port" ]; then
+					continue
+				fi
+				# Check if somebody's reserved or using it
+				grep -E "(:| )$node_port( |$)" "$EXTRA_PORTS_FILE" >&/dev/null && continue 
+				echo $active_ports | grep -E "(^|\s+)$node_port(\s+|$)" >& /dev/null && continue
+				break
+			done
+			if [[ -z "$node_port" || $node_port == 32768 ]]; then
+				echo "ERROR: No free extra port found"
+			else
+				final_pod_extra_ports="$node_port $final_pod_extra_ports"
+				node_port_line="nodePort: $node_port"
+				# Block access for others than the current client IP
+				if [[ -n "$allowed_ip" && -n "$node_port" ]]; then
+					# Block access from everywhere
+					$run sudo iptables -t raw -A PREROUTING -p tcp --dport $node_port -j DROP
+					$run sudo iptables -t raw -A PREROUTING -p udp --dport $node_port -j DROP
+					# Allow access from $allowed_ip
+					$run sudo iptables -t raw -I PREROUTING -p tcp --dport $node_port -s $allowed_ip -j ACCEPT
+					$run sudo iptables -t raw -I PREROUTING -p udp --dport $node_port -s $allowed_ip -j ACCEPT
+				fi
+			fi
+		fi
+		
 		echo "---"
 		cat "$EXTRA_SERVICE_YAML_FILE" | \
-		sed "s|EXTRA_PORT|${pod_port}|g" | \
+		sed "s|EXTRA_PORT|${node_port}|g" | \
 		sed "s|nodePort: NODE_PORT|${node_port_line}|g" | \
+		sed "s|NODE_PORT|${node_port}|g" | \
 		yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
 		yq -r -y ".metadata.name=\"${pod_name}-extra-${pod_port}\"" |\
 		yq -r -y ".spec.selector={\"app\":\"$pod_name\"}"

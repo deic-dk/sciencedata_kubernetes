@@ -73,4 +73,35 @@ echo $allowed_ips | sed "s|,|\n|" | while read allowed_ip; do
 	$run sudo iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
 done
 
+# Iterate over extra ports of pod
+kubectl get services --all-namespaces | grep " NodePort " | grep " $pod_name\-extra\-" | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | \
+while read extra_port; do
+
+	# Check if DROP rules exists and create if not
+	sudo iptables -t raw -S PREROUTING | grep DROP | grep '\-p tcp' | grep "dport $extra_port "
+	if [ $? -ne 0 ]; then
+		$run sudo iptables -t raw -A PREROUTING -p tcp --dport $extra_port -j DROP
+	fi
+	sudo iptables -t raw -S PREROUTING | grep DROP | grep '\-p udp' | grep "dport $extra_port "
+	if [ $? -ne 0 ]; then
+		$run sudo iptables -t raw -A PREROUTING -p udp --dport $extra_port -j DROP
+	fi
+	
+	# Delete ACCEPT rules for this port
+	# E.g. iptables -t raw -I PREROUTING -p tcp --dport $extra_port -s $allowed_ip -j ACCEPT
+	sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $extra_port" | while read line; do
+		allowed_ip=`echo $line | sed -E 's|.* -s (\S+) .*|\1|'`
+		cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
+		$run sudo iptables $cmd
+	done
+	
+	# Add new rules
+	echo $allowed_ips | sed "s|,|\n|" | while read allowed_ip; do
+		$run sudo iptables -t raw -I PREROUTING -p tcp --dport $extra_port -s $allowed_ip -j ACCEPT
+		$run sudo iptables -t raw -I PREROUTING -p udp --dport $extra_port -s $allowed_ip -j ACCEPT
+	done
+
+done
+
+
 

@@ -9,8 +9,9 @@ TMPDIR="/tmp"
 
 HTTPS_PORTS_FILE="/usr/local/etc/kube/pod_https_ports.txt"
 SSH_PORTS_FILE="/usr/local/etc/kube/pod_ssh_ports.txt"
+EXTRA_PORTS_FILE="/usr/local/etc/kube/pod_extra_ports.txt"
 
-while getopts "u:w:s:d" flag; do
+while getopts "u:w:s:x:d" flag; do
 	case "$flag" in
 		u)
 			user=$OPTARG
@@ -20,6 +21,9 @@ while getopts "u:w:s:d" flag; do
 			;;
 		s)
 			ssh_port=$OPTARG
+			;;
+		x)
+			extra_ports=$OPTARG
 			;;
 		d)
 			run="echo"
@@ -45,6 +49,7 @@ fi
 
 sed -i -E "/^$pod_name:/d" "$HTTPS_PORTS_FILE"
 if [ -n "$https_port" ]; then
+	# Extra check - has already been made when assigning the port
 	if [[ ! `grep ":$https_port$" "$HTTPS_PORTS_FILE"` ]]; then
 		echo "Setting HTTPS port $https_port for $pod_name" >> $logfile
 		$run echo "$pod_name:$https_port" >> "$HTTPS_PORTS_FILE"
@@ -56,6 +61,7 @@ fi
 
 sed -i -E "/^$pod_name:/d" "$SSH_PORTS_FILE"
 if [ -n "$ssh_port" ]; then
+	# Extra check - has already been made when assigning the port
 	if [[ ! `grep ":$https_port$" "$SSH_PORTS_FILE"` ]]; then
 		echo "Setting SSH port $ssh_port for $pod_name" >> $logfile
 		$run echo "$pod_name:$ssh_port" >> "$SSH_PORTS_FILE"
@@ -65,5 +71,12 @@ if [ -n "$ssh_port" ]; then
 	fi
 fi
 
-
+sed -i -E "/^$pod_name:/d" "$EXTRA_PORTS_FILE"
+if [ -n "$extra_ports" ]; then
+	# Should be safe - the list of ports has been checked and possibly redefined by run_pod
+	extra_ports_spaces="`echo $extra_ports | sed 's| +||g'`"
+	extra_ports_spaces="`echo $extra_ports_spaces | sed 's|,| |g'`"
+	echo "Setting extra port $extra_ports_spaces for $pod_name" >> $logfile
+	$run echo "$pod_name:$extra_ports_spaces" >> "$SSH_PORTS_FILE"
+fi
 
