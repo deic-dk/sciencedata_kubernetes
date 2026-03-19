@@ -6,6 +6,7 @@ user=""
 run=""
 logfile='/var/log/kube.log'
 TMPDIR="/tmp"
+POD_DISK_NODES_FILE="/usr/local/etc/kube/pod_disk_nodes.txt"
 
 while getopts "u:d" flag; do
 	case "$flag" in
@@ -114,6 +115,17 @@ check_claim_used() {
 	fi
 }
 
+register_file_mount (){
+	pod_name="$1"
+	node_name=`kubectl get pod $pod_name -o json | yq -r .spec.nodeName`
+	if [[ -n "$pod_name" && -n "$node_name" ]]; then
+		# Delete any existing entry matching for pod
+		sed -i "/^$pod_name:/d" "$POD_DISK_NODES_FILE"
+		# Add entry
+		echo "$pod_name:$node_name" >> "$POD_DISK_NODES_FILE"
+	fi
+}
+
 remove_claim_and_volume() {
 	#each volume can only be bound to one claim, so this should be safe
 	claim_name="$1"
@@ -124,8 +136,11 @@ remove_claim_and_volume() {
 }
 
 remove_persistent_volumes() {
-	kubectl get pod "$pod_name" -o json | jq -r '.spec.volumes[] | select((.name == "sciencedata") or (.name | startswith("local--"))) | .persistentVolumeClaim.claimName' |\
+	kubectl get pod "$pod_name" -o json | jq -r '.spec.volumes[] | select((.name == "sciencedata") or (.name | startswith("local-")) or (.name | startswith("disk-"))) | .persistentVolumeClaim.claimName' |\
 	while read claim_name; do
+		if [[ "$claim_name" != "null" && -n "$claim_name" && $claim_name =~ disk- ]]; then
+			register_file_mount "$pod_name"
+		fi
 		if [[ "$claim_name" != "null" && -n "$claim_name" ]]; then
 			used_by_others=$(check_claim_used "$claim_name")
 			if [[ "$used_by_others" == "false" ]]; then

@@ -48,11 +48,16 @@ NFS_VOLUME_YAML_FILE="$DIR/../service_manifests/nfs_volume.yaml"
 NFS_CLAIM_YAML_FILE="$DIR/../service_manifests/nfs_claim.yaml"
 LOCAl_VOLUME_YAML_FILE="$DIR/../service_manifests/local_volume.yaml"
 LOCAL_CLAIM_YAML_FILE="$DIR/../service_manifests/local_claim.yaml"
+# This path must exist on the disk worker nodes
+DISK_BASE_PATH="/tank/data/kube"
+DISK_VOLUME_YAML_FILE="$DIR/../service_manifests/disk_volume.yaml"
+DISK_CLAIM_YAML_FILE="$DIR/../service_manifests/disk_claim.yaml"
 CADDY_FILE="$DIR/../service_manifests/Caddyfile"
 TMPDIR="/tmp"
 HTTPS_PORTS_FILE="/usr/local/etc/kube/pod_https_ports.txt"
 EXTRA_PORTS_FILE="/usr/local/etc/kube/pod_extra_ports.txt"
 SSH_PORTS_FILE="/usr/local/etc/kube/pod_ssh_ports.txt"
+POD_DISK_NODES_FILE="/usr/local/etc/kube/pod_disk_nodes.txt"
 
 yaml_file=""
 owner=""
@@ -491,6 +496,10 @@ fi
 ### See https://github.com/kubernetes/kubernetes/issues/89033
 modified_yaml=$( ( yq -r -y ".spec.enableServiceLinks = false" ) <<< "$modified_yaml" )
 
+### Add disk limits
+modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.\"ephemeral-storage\" = \"7Gi\"" ) <<< "$modified_yaml" )
+modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.\"ephemeral-storage\" = \"50Gi\"" ) <<< "$modified_yaml" )	
+
 ### Add memory and CPU limits
 if [[ -n "$pod_type" ]]; then
 	if [[ "$pod_type" == "small" ]]; then
@@ -514,14 +523,34 @@ if [[ -n "$pod_type" ]]; then
 	if [[ "$pod_type" == "gpu1" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.runtimeClassName = \"nvidia\"" ) <<< "$modified_yaml" )
 		#modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.\"nvidia.com/gpu\" = 1" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= \"1\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.nodeSelector.gpusPresent = \"yes\"" ) <<< "$modified_yaml" )
+		if [[ -n "`echo $modified_yaml | grep CUDA_VISIBLE_DEVICES_NUM`" ]]; then
+			modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= \"1\"" ) <<< "$modified_yaml" )
+		else
+			modified_yaml=$( ( yq -r ".spec.containers[].env |= . + [{ \"name\": \"CUDA_VISIBLE_DEVICES_NUM\", \"value\": \"1\" }]" ) <<< "$modified_yaml" )
+		fi
+		modified_yaml=$( ( yq -r -y ".spec.nodeSelector.\"gpus-present\" = \"yes\"" ) <<< "$modified_yaml" )
 	fi
 	if [[ "$pod_type" == "gpu4" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.runtimeClassName = \"nvidia\"" ) <<< "$modified_yaml" )
 		#modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.\"nvidia.com/gpu\" = 4" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= \"4\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.nodeSelector.gpusPresent = \"yes\"" ) <<< "$modified_yaml" )
+		if [[ -n "`echo $modified_yaml | grep CUDA_VISIBLE_DEVICES_NUM`" ]]; then
+			modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= \"4\"" ) <<< "$modified_yaml" )
+		else
+			modified_yaml=$( ( yq -r ".spec.containers[].env |= . + [{ \"name\": \"CUDA_VISIBLE_DEVICES_NUM\", \"value\": \"4\" }]" ) <<< "$modified_yaml" )
+		fi
+		modified_yaml=$( ( yq -r -y ".spec.nodeSelector.\"gpus-present\" = \"yes\"" ) <<< "$modified_yaml" )
+	fi
+	if [[ "$pod_type" =~ "disk" ]]; then
+		modified_yaml=$( ( yq -r -y ".spec.nodeSelector.\"disk-present\" = \"yes\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].volumeMounts |= . + [{ \"name\": \"disk-${pod_name}-${pod_type}\", \"mountPath\": \"/mnt\" }]" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.volumes |= . + [{ \"name\": \"disk-${pod_name}-${pod_type}\", \"persistentVolumeClaim\": { \"claimName\": \"disk-${pod_name}-${pod_type}-claim\" } }]" ) <<< "$modified_yaml" )
+	# If an entry exists in $POD_DISK_NODES_FILE, honour it
+	if [ -n "`grep -E "^$pod_name:" "$POD_DISK_NODES_FILE"`" ]; then
+		node_name=`grep -E "^$pod_name:" "$POD_DISK_NODES_FILE" | sed -E "s/^$pod_name:(.+)$/\1/"`
+		if [ -n "$node_name" ]; then
+					modified_yaml=$( ( yq -r -y ".spec.nodeName = \"$node_name\"" ) <<< "$modified_yaml" )
+		fi
+	fi
 	fi
 fi
 
@@ -688,7 +717,7 @@ if [ -n "$pod_extra_ports" ]; then
 		
 		echo "---"
 		cat "$EXTRA_SERVICE_YAML_FILE" | \
-		sed "s|EXTRA_PORT|${node_port}|g" | \
+		sed "s|EXTRA_PORT|${pod_port}|g" | \
 		sed "s|nodePort: NODE_PORT|${node_port_line}|g" | \
 		sed "s|NODE_PORT|${node_port}|g" | \
 		yq -r -y ".spec.externalIPs=[\"$EXTERNAL_IP\"]" |\
@@ -718,9 +747,9 @@ if [[ -n "$nfs_storage_path" || -n "$nfs_files_path" ]]; then
 		sed "s|NFS_CLAIM_NAME|${nfs_claim_name}|g"
 	fi
 fi
-### Local volume
-echo "Creating volumes $create_local_volume" >> "$logfile"
+### Local r/o volume
 if [ -n "$create_local_volume" ]; then
+	echo "Creating volumes $create_local_volume" >> "$logfile"
 	while read lsp; do
 		local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
 		echo "---"
@@ -730,9 +759,9 @@ if [ -n "$create_local_volume" ]; then
 		sed "s|LOCAL_STORAGE_CLASS_NAME|manual-${local_storage_name}|g"
 	done <<< $(echo "$create_local_volume" | sed "s|,|\n|g")
 fi
-echo "Creating volumeclaims $create_local_claim" >> "$logfile"
-### Local persistent volume claim
+### Local r/o persistent volume claim
 if [ -n "$create_local_claim" ]; then
+	echo "Creating volume claims $create_local_claim" >> "$logfile"
 	while read lsp; do
 		local_storage_name=`echo $lsp | sed 's|[/\. ]|-|g' | awk '{print tolower($0)}'`
 		echo "---"
@@ -740,6 +769,29 @@ if [ -n "$create_local_claim" ]; then
 		sed "s|LOCAL_CLAIM_NAME|local-claim-${local_storage_name}|g" | \
 		sed "s|LOCAL_STORAGE_CLASS_NAME|manual-${local_storage_name}|g"
 	done <<< $(echo "$create_local_claim" | sed "s|,|\n|g")
+fi
+### Local r/w disk
+if [[ "$pod_type" =~ "disk" ]]; then
+	echo "Creating disk volume ${pod_name}-${pod_type}" >> "$logfile"
+	disk_size="`echo $pod_type | sed -E 's|^disk(.*)b$|\U\1|'`i"
+	disk_folder="$DISK_BASE_PATH/${pod_name}-disk"
+	# $disk_folder is created by crio on the node picking up the pod
+	# Kubernetes does not limit disk space consumption, it only schedules claims on
+	# volumes with spec.capacity.storage matching the claimed spec.resource.requests.storage.
+	# spec.resource.limits.storage is apparently not enforced.
+	# Therefore, above, the pod is scheduled on nodes labelled 'disk-present'
+	echo "---"
+	cat "$DISK_VOLUME_YAML_FILE" | \
+	sed "s|DISK_VOLUME_NAME|${pod_name}-${pod_type}|g" | \
+	sed "s|DISK_VOLUME_SIZE|${disk_size}|g" | \
+	sed "s|DISK_STORAGE_CLASS_NAME|disk-${pod_name}-${pod_type}|g" | \
+	sed "s|DISK_STORAGE_PATH|${disk_folder}|g"
+	echo "Creating disk volume claim $create_local_claim" >> "$logfile"
+	echo "---"
+	cat "$DISK_CLAIM_YAML_FILE" | \
+	sed "s|DISK_VOLUME_SIZE|${disk_size}|g" | \
+	sed "s|DISK_CLAIM_NAME|disk-${pod_name}-${pod_type}-claim|g" | \
+	sed "s|DISK_STORAGE_CLASS_NAME|disk-${pod_name}-${pod_type}|g"	
 fi
 )
 ### End modify pod YAML

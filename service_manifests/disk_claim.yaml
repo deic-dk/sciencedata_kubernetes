@@ -1,0 +1,15 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: DISK_CLAIM_NAME
+  labels:
+    type: disk
+spec:
+  storageClassName: DISK_STORAGE_CLASS_NAME
+  accessModes:
+    - ReadWriteOncePod
+  resources:
+    requests:
+      storage: DISK_VOLUME_SIZE
+    limits:
+      storage: DISK_VOLUME_SIZE
