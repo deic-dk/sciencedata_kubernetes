@@ -11,12 +11,12 @@ $_GET = array_map(function($x){return escapeshellcmd($x);}, $_GET);
 
 $owner = $_GET['user_id']; // ID of the user logged into ScienceData
 $pod = $_GET['pod']; // Name of the pod
-$ips = $_GET['ips']; // Comma-separated list of CIDRs, each of which can be fed to iptables
+$ips = empty($_GET['ips'])?"":$_GET['ips']; // Comma-separated list of CIDRs, each of which can be fed to iptables
 
 $output = null;
 $retval = null;
 
-if(empty($owner) || empty($pod) || empty($ips)){
+if(empty($owner) || empty($pod)){
 	header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
 	echo "<h1>Missing parameter(s)!</h1>";
 	exit;
