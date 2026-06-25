@@ -2,6 +2,8 @@
 
 $logFile = "/var/log/kube.log";
 $admins = ['cloud', 'fror@dtu.dk'];
+// Allow test pods on the 10.2 network
+$test_pods_ips = ['10.2.164.63', '10.2.24.238', '10.2.164.64'];
 
 // This is just to allow command-line testing
 if(!empty($argv[1])){
@@ -12,7 +14,8 @@ file_put_contents($logFile,  "GET: ".serialize($_GET). "\n", FILE_APPEND);
 
 // curl '10.0.0.12/run_pod.php?user_id=fror@dtu.dk&mount_path=www&public_key=ssh-rsa%20AAAAB3NzaC1yc2EAAAABIwAAAIEA1lUNAcCuUvl2nxu0ILt0zfdESUmOGlktcDbv8ufRcJ6A1oYDksn%2BFHxxWU3X7laD7dfF9BBkLr5nC3M7ZuuoW1j2QcHcdFRSfTSLuSYM%2FebHdR5g65gGJWrc8qCaFEWS2unLz6rbCqtKBscQDsLtosIXx1brOmWFATWm%2FuCvABc%3D%20frederik%40pcitapi34&yaml_uri=/files/tmp/ubuntu_sciencedata.yaml'
 
-if(empty($_SERVER['REMOTE_ADDR']) || strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0){
+if(empty($_SERVER['REMOTE_ADDR']) || strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0 &&
+		!in_array($_SERVER['REMOTE_ADDR'], $test_pods_ips)){
 	empty($_SERVER['SERVER_PROTOCOL'])?"":header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
 	exit;
 }
