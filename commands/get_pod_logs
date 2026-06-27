@@ -28,10 +28,10 @@ DIR="$(dirname "$(readlink -f "$0")")"
 
 # If user is given, check that user owns pod
 if [ -n "$user" ]; then
-	owner=`$DIR/get_containers | grep "^$pod_name|" | awk -F'|' '{print $6}'`
+	owner=`$DIR/get_containers $user 2>/dev/null | grep "^$pod_name|" | awk -F'|' '{print $6}'`
 #	echo $owner
-	if [[ "$owner" != "" && "$owner" != "$user" ]]; then
-		echo "ERROR: pod $pod_name owned by $owner, NOT $user" >&2
+	if [[ "$owner" == "" || "$owner" != "$user" ]]; then
+		echo "ERROR: pod $pod_name not found or not owned by $owner, NOT $user" >&2
 		exit 1
 	fi
 fi

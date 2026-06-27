@@ -21,6 +21,17 @@ if(empty($owner) || empty($pod)){
 	exit;
 }
 else{
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_pod_logs -u "$owner" "$pod"`;
+	$output = [];
+	$ret = "";
+	exec('export KUBECONFIG=/etc/kubernetes/admin.conf; get_pod_logs -u "'.$owner.'" "'.$pod.'"', $output, $ret);
+	if($ret==0){
+		echo implode("\n", $output);
+	}
+	else{
+		header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);
+		echo "{\"data\":{\"message\":\"Could not get pod log\"}, ".
+			"\"status\":\"error\"}";
+		exit;
+	}
 }
 ?>
