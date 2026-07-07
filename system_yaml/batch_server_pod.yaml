@@ -4,7 +4,7 @@ metadata:
   name: batch
   labels:
     app: batch
-    user: cloud
+    user: batch
 spec:
   containers:
   - name: batch
@@ -15,9 +15,9 @@ spec:
     - name: SD_UID
       value: 'cloud'
     - name: HOME_SERVER
-      value: ''
+      value: '10.2.0.13'
     - name: PUBLIC_HOME_SERVER
-      value: ''
+      value: 'sciencedata.dk'
     - name: ONLY_FROM
       value: "10.2.12.1"
     - name: SSL_DN_HEADER

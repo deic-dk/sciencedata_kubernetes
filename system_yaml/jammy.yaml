@@ -16,6 +16,14 @@ spec:
     resources:
       limits:
         nvidia.com/gpu: 1
+    env:
+    - name: HOME_SERVER
+      value: ""
+    - name: SD_UID
+      value: ""
+    - name: CUDA_VISIBLE_DEVICES_NUM
+      value: "1"
+
   runtimeClassName: nvidia   #<--- USE THE NVIDIA CONTAINER RUNTIME
   nodeName: worker1
   nodeSelector:              #<--- RUN ON GPU ${NODE_NAME}
