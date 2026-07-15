@@ -1,0 +1,19 @@
+{
+  auto_https disable_redirects
+  admin off
+}
+
+https://kube.sciencedata.dk:WEBPORT {
+
+  tls {
+    client_auth {
+      mode verify_if_given
+      trusted_ca_cert_file /root/batch_certificates/sciencedata_ca_cert.pem
+    }
+  }
+
+  reverse_proxy {
+    to PODIP:PODPORT
+    header_up SSL-CLIENT-S-DN {http.request.tls.client.subject}
+  }
+}

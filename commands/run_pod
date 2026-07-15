@@ -53,6 +53,7 @@ DISK_BASE_PATH="/tank/data/kube"
 DISK_VOLUME_YAML_FILE="$DIR/../service_manifests/disk_volume.yaml"
 DISK_CLAIM_YAML_FILE="$DIR/../service_manifests/disk_claim.yaml"
 CADDY_FILE="$DIR/../service_manifests/Caddyfile"
+CADDY_FILE_HTTPS="$DIR/../service_manifests/Caddyfile_https"
 TMPDIR="/tmp"
 HTTPS_PORTS_FILE="/usr/local/etc/kube/pod_https_ports.txt"
 EXTRA_PORTS_FILE="/usr/local/etc/kube/pod_extra_ports.txt"
@@ -79,7 +80,12 @@ start_reverse_proxy() {
 			rm ${TMPDIR}/uri-${pod_name} 2>&1 >> "$logfile"
 			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >> "$logfile"
 			caddyfile="$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}-${pod_name}"
-			sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$caddyfile"
+			# If reverse-proxying to pod port 443, we assume https
+			if [[ "$pod_http_port" == "443" ]]; then
+				sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE_HTTPS" > "$caddyfile"
+			else
+				sed "s|WEBPORT|$reverse_proxy_port|" "$CADDY_FILE" > "$caddyfile"
+			fi
 			sed -i "s|PODIP|$pod_ip|" "$caddyfile"
 			sed -i "s|PODPORT|$pod_http_port|" "$caddyfile"
 			export PATH=/bin/:/usr/bin:/usr/local/bin

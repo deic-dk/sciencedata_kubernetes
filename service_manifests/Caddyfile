@@ -7,4 +7,5 @@ https://kube.sciencedata.dk:WEBPORT
 
 reverse_proxy {
   to PODIP:PODPORT
+  header_up SSL-Client-DN {http.request.tls.client.subject}
 }
