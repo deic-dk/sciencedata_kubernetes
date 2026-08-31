@@ -31,13 +31,13 @@ if(empty($owner)){
 }
 
 if(empty($fields) || $fields=="include"){
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner $pod_ip" 2>&1 | grep '|' | grep -v '^#'`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "${owner}${pod_ip}" 2>&1 | grep '|' | grep -v '^#'`;
 }
 elseif($fields=="yes" || $fields=="true"){// only fields 
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner $pod_ip" 2>&1 | head -2 | tail -1 | sed -E 's|^#||'`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "${owner}${pod_ip}" 2>&1 | head -2 | tail -1 | sed -E 's|^#||'`;
 }
 else{// fields=no , i.e. only values
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner $pod_ip"`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "${owner}${pod_ip}"`;
 }
 
 ?>
