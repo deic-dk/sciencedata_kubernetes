@@ -21,6 +21,7 @@ $_GET = array_map(function($x){return escapeshellcmd($x);}, $_GET);
 $owner = $_GET['user_id']; // ID of the user logged into ScienceData
 $password = empty($_GET['password'])?'':$_GET['password']; // Only used if user_id is empty
 $fields = $_GET['fields']; // Get just the fields, the data or both fields and data
+$pod_ip = $_GET['pod_ip']; // Get just one pod - used by sciencedata to check who owns the pod a given request is coming from
 
 if(empty($owner)){
 	if(!checkpassword($password)){
@@ -30,13 +31,13 @@ if(empty($owner)){
 }
 
 if(empty($fields) || $fields=="include"){
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner" 2>&1 | grep '|' | grep -v '^#'`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner $pod_ip" 2>&1 | grep '|' | grep -v '^#'`;
 }
 elseif($fields=="yes" || $fields=="true"){// only fields 
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner" 2>&1 | head -2 | tail -1 | sed -E 's|^#||'`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner $pod_ip" 2>&1 | head -2 | tail -1 | sed -E 's|^#||'`;
 }
 else{// fields=no , i.e. only values
-	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner"`;
+	echo `export KUBECONFIG=/etc/kubernetes/admin.conf; get_containers "$owner $pod_ip"`;
 }
 
 ?>
