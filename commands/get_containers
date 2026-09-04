@@ -17,7 +17,7 @@ pod_ip="$2"
 user=`echo $owner | awk -F@ '{print $1}'`
 domain=`echo $owner | awk -F@ '{print $2}'`
 
-if [[ -n "$owner" ]]; then
+if [[ -n "$owner" && "$owner" != "none" ]]; then
     if [[ -z "$domain" ]]; then
         labels="-l user=$user"
     else
@@ -48,8 +48,7 @@ function getKeepPorts(){
 if [ -n "$pod_ip" ]; then
 	ip_selector="--field-selector status.podIP=$pod_ip"
 fi
-
-echo $(kubectl get pods ${labels:+"$labels"} ${ip_selector:+"$ip_selector"} --all-namespaces -o json) |\
+echo $(kubectl get pods ${labels:+"$labels"} ${ip_selector} --all-namespaces -o json) |\
     jq -r '.items[] | {name: .metadata.name, '\
 'cname: [.spec.containers[].name][0]?, '\
 'image: [.spec.containers[].image][0]?, '\
