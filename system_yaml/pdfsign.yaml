@@ -43,6 +43,8 @@ spec:
         env:
         - name: USERNAME
           value: "www"
+        - name: TS
+          value: "https://lab.sciencedata.dk/tsa/"
         image: sciencedata/pdf_sign_sciencedata:latest
         imagePullPolicy: "Always"
         name: pdfsign
