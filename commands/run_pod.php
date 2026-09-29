@@ -4,6 +4,13 @@ $logFile = "/var/log/kube.log";
 $admins = ['cloud', 'fror@dtu.dk'];
 // Allow test pods on the 10.2 network
 $test_pods_ips = ['10.2.164.63', '10.2.24.238', '10.2.164.64'];
+$new_sciencedata_ips = ['10.0.0.20', '10.0.0.21', '10.0.0.22'];
+$new_master_ip = '10.0.0.20';
+$new_data_dir = 'nextcloud';
+$new_get_user_server_uri = 'apps/files_sharding/trusted/user-server';
+$test_master_ip = 'kube.sciencedata.dk:2002';
+$test_data_dir = 'nextcloud';
+$test_get_user_server_uri = 'apps/files_sharding/trusted/user-server';
 
 // This is just to allow command-line testing
 if(!empty($argv[1])){
@@ -14,6 +21,7 @@ file_put_contents($logFile,  "GET: ".serialize($_GET). "\n", FILE_APPEND);
 
 // curl '10.0.0.12/run_pod.php?user_id=fror@dtu.dk&mount_path=www&public_key=ssh-rsa%20AAAAB3NzaC1yc2EAAAABIwAAAIEA1lUNAcCuUvl2nxu0ILt0zfdESUmOGlktcDbv8ufRcJ6A1oYDksn%2BFHxxWU3X7laD7dfF9BBkLr5nC3M7ZuuoW1j2QcHcdFRSfTSLuSYM%2FebHdR5g65gGJWrc8qCaFEWS2unLz6rbCqtKBscQDsLtosIXx1brOmWFATWm%2FuCvABc%3D%20frederik%40pcitapi34&yaml_uri=/files/tmp/ubuntu_sciencedata.yaml'
 
+// We only allow requests from trusted IPs
 if(empty($_SERVER['REMOTE_ADDR']) || strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0 &&
 		!in_array($_SERVER['REMOTE_ADDR'], $test_pods_ips)){
 	empty($_SERVER['SERVER_PROTOCOL'])?"":header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
@@ -127,6 +135,8 @@ $cmd = '/bin/bash -c set -o pipefail;' . // use bash with pipefail so the error 
 	(empty($file) ? '' : ' export FILE="' . $file . '";') .
 	(empty($peers) ? '' : ' export PEERS="' . $peers . '";') .
 	(empty($setup_script) ? '' : ' export SETUP_SCRIPT="' . $setup_script . '";') .
+	(!empty($new_sciencedata_ips) && in_array($_SERVER['REMOTE_ADDR'], $new_sciencedata_ips) ? ' export SCIENCEDATA_IP="' . $new_master_ip . '"; export DATA_DIR="' . $new_data_dir . '"; export GET_USER_SERVER_URI="' . $new_get_user_server_uri . '";' : '') .
+	(!empty($test_pods_ips) && in_array($_SERVER['REMOTE_ADDR'], $test_pods_ips) ? ' export SCIENCEDATA_IP="' . $test_master_ip . '"; export DATA_DIR="' . $test_data_dir . '"; export GET_USER_SERVER_URI="' . $test_get_user_server_uri . '";':'') .
 	' run_pod ' . 
 	' -o "' . $owner . '"' .
 	' -s "' . $_SERVER['REMOTE_ADDR'] . '"' .

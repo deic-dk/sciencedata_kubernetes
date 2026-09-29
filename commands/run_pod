@@ -10,10 +10,12 @@ logfile='/var/log/kube.log'
 # If you have more than one public IP, you may need to hardcode EXTERNAL_IP
 EXTERNAL_IP=`hostname -I | sed "s| |\n|g" |  grep -E -v '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)' | head -1`
 # ScienceData internal IP. This presumes you've made an entry for sciencedata in /etc/hosts -if not, just hardcode SCIENCEDATA_IP
-SCIENCEDATA_IP=`grep -E '\ssciencedata$' /etc/hosts | sed -E 's|^([0-9\.]+)\s.*|\1|'`
+SCIENCEDATA_IP=${SCIENCEDATA_IP:-`grep -E '\ssciencedata$' /etc/hosts | sed -E 's|^([0-9\.]+)\s.*|\1|'`}
 if [ -z "$SCIENCEDATA_IP" ]; then
 	SCIENCEDATA_IP=10.0.0.13
 fi
+
+GET_USER_SERVER_URI=${GET_USER_SERVER_URI:-apps/files_sharding/ws/get_user_server.php}
 
 # If $PEERS is set and contains an unqualified host entry with no IP, check if the host is in /etc/hosts and fill in if it is.
 if [ -n $PEERS ]; then
@@ -322,6 +324,7 @@ if [[ "$yaml_domain" != "" && "$yaml_domain" != "null" && "$yaml_domain" == "$do
 fi
 
 if [[ "$user_allowed" == 1 && "$yaml_group" != "" && "$yaml_group" != "null" ]]; then
+	echo "Checking group membership at https://${SCIENCEDATA_IP}/remote.php/groupadmin?action=isMember&group=${yaml_group}&member=${owner}" >> "$logfile"
 	gstatus=`curl --insecure "https://${SCIENCEDATA_IP}/remote.php/groupadmin?action=isMember&group=${yaml_group}&member=${owner}" | jq -r .status`
 	if [[ "$gstatus" == "success" ]]; then
 		echo "Allowed group user $owner as member of $yaml_group" >> "$logfile"
@@ -352,7 +355,7 @@ if [ -n "$new_pod_name" ] && [ "$new_pod_name" != "$pod_name" ]; then
 fi
 
 # Check if $owner has a public home server configured, otherwise set to $SCIENCEDATA_PUBLIC_IP
-public_home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=no" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2>> "$logfile"`
+public_home_server=`curl --insecure "https://${SCIENCEDATA_IP}/${GET_USER_SERVER_URI}?user_id=${owner}&internal=no" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2>> "$logfile"`
 echo "Home server: $public_home_server" >> "$logfile"
 if [ -z "$public_home_server" ]; then
 	public_home_server=$SCIENCEDATA_PUBLIC_IP
@@ -360,12 +363,12 @@ fi
 
 # Check if home_server is set, otherwise check if $owner has a home server configured, finally to $SCIENCEDATA_IP
 if [ -z $home_server ]; then
-	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/apps/files_sharding/ws/get_user_server.php?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> /dev/null`
+	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/${GET_USER_SERVER_URI}?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> /dev/null`
 fi
 
 if [[ -n "$nfs_storage_path" || -n "$nfs_files_path" ]]; then
 	web_prefix="files"
-	prefix="tank/data/owncloud"
+	prefix="tank/data/${DATA_DIR:-owncloud}"
 	nfs_path=$nfs_files_path
 	suffix="files/"
 	nfs_access="ro"
