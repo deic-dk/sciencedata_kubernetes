@@ -93,8 +93,11 @@ echo $(kubectl get pods ${labels:+"$labels"} ${ip_selector} --all-namespaces -o 
             owner="$user"
         fi
         ssh_port=`getService "${pod_name}-ssh" | jq -r '.spec.ports[].nodePort'`
-        if [ -n "$ssh_port" ]; then
-          allowed_ips=`sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $ssh_port" | sed -E 's|.* -s (\S+) .*|\1|'`
+        # Allowed IPs from the SSH port's rules - or, without SSH, the https (Caddy) port's
+        allowed_ips=""
+        firewalled_port="${ssh_port:-${array[12]}}"
+        if [ -n "$firewalled_port" ]; then
+          allowed_ips=`sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $firewalled_port " | sed -E 's|.* -s (\S+) .*|\1|'`
           allowed_ips=`echo $allowed_ips | sed -E 's| +|,|g'`
         fi
         extra_ports=`kubectl get service --all-namespaces | grep "${pod_name}\-extra" 2>/dev/null | sed -E 's|^.+-([0-9]+) +.+ +[0-9]+:([0-9]+)/.+|\1:\2|'`

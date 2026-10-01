@@ -476,6 +476,11 @@ if [[ -n $pod_http_port ]]; then
 else
   reverse_proxy_port=''
 fi
+# Block web access for others than the current client IP - as for SSH and extra ports
+if [[ -n "$allowed_ip" && -n "$reverse_proxy_port" ]]; then
+	$run sudo iptables -t raw -A PREROUTING -p tcp --dport $reverse_proxy_port -j DROP
+	$run sudo iptables -t raw -I PREROUTING -p tcp --dport $reverse_proxy_port -s $allowed_ip -j ACCEPT
+fi
 
 # This is picked up by start.sh inside the container (for ScienceData-enabled containers)
 if [ $home_server ]; then

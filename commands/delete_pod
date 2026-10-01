@@ -170,8 +170,9 @@ remove_ssh_firewall_rules() {
 		$run sudo iptables $cmd
 	done
 	
-	# Extra ports
-	kubectl get services --all-namespaces | grep " NodePort " | grep " $pod_name\-extra-" | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | \
+	# Extra ports - and the https (Caddy) port, podInfo[10]
+	{ kubectl get services --all-namespaces | grep " NodePort " | grep " $pod_name\-extra-"; echo "${podInfo[10]}"; } | \
+	sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | grep . | \
 	while read extra_port; do
 		sudo iptables -t raw -S PREROUTING | grep DROP | grep "dport $extra_port " | while read line; do
 			cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
