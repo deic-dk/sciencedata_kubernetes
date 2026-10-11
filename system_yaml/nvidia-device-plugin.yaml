@@ -1,0 +1,49 @@
+# NVIDIA device plugin (https://github.com/NVIDIA/k8s-device-plugin), static
+# manifest v0.17.1 adapted to this cluster: on CRI-O the NVIDIA runtime is not
+# the default but the RuntimeClass "nvidia" (system_yaml/nvidia_runtime_class.yaml),
+# so the plugin's own pod must use it to see the GPUs (without it, it logs
+# "could not load NVML library" and advertises nothing). Runs only on nodes
+# labelled gpus-present=yes. When it works, the node shows nvidia.com/gpu in its
+# capacity, and a pod with limits nvidia.com/gpu: N (plus runtimeClassName:
+# nvidia) gets N GPUs of its own, via NVIDIA_VISIBLE_DEVICES.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: nvidia-device-plugin-ds
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nvidia-device-plugin-ds
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        gpus-present: "yes"
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      priorityClassName: "system-node-critical"
+      containers:
+      - image: nvcr.io/nvidia/k8s-device-plugin:v0.17.1
+        name: nvidia-device-plugin-ctr
+        env:
+          - name: FAIL_ON_INIT_ERROR
+            value: "false"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: device-plugin
+          mountPath: /var/lib/kubelet/device-plugins
+      volumes:
+      - name: device-plugin
+        hostPath:
+          path: /var/lib/kubelet/device-plugins

@@ -43,6 +43,11 @@ spec:
           containerPort: 80
         - name: https
           containerPort: 443
+        resources:
+          requests:
+            ephemeral-storage: "20Gi"
+          limits:
+            ephemeral-storage: "100Gi"
       #nodeName: peon152
 ---
 apiVersion: v1

@@ -530,11 +530,27 @@ if [[ -n "$pod_type" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"256Mi\"" ) <<< "$modified_yaml" )
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"250m\"" ) <<< "$modified_yaml" )
 	fi
-	if [[ "$pod_type" == "medium" || "$pod_type" == "gpu1" || "$pod_type" == "gpu4" ]]; then
+	if [[ "$pod_type" == "medium" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"256Mi\"" ) <<< "$modified_yaml" )
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"250m\"" ) <<< "$modified_yaml" )
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"512Mi\"" ) <<< "$modified_yaml" )
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"500m\"" ) <<< "$modified_yaml" )
+	fi
+	# GPU pods need host memory and CPU in proportion to their GPUs: data loading,
+	# models are staged in host RAM before they go to the GPU, /dev/shm for the
+	# DataLoader workers counts against the memory limit. Sized for worker1
+	# (10 GPUs with 11 GB each, 48 cores, 251 GB RAM): about 24 GB and 4 cores per GPU.
+	if [[ "$pod_type" == "gpu1" ]]; then
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"4Gi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"1000m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"24Gi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"4000m\"" ) <<< "$modified_yaml" )
+	fi
+	if [[ "$pod_type" == "gpu4" ]]; then
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"16Gi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"4000m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"96Gi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"16000m\"" ) <<< "$modified_yaml" )
 	fi
 	if [[ "$pod_type" == "large" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"1024Mi\"" ) <<< "$modified_yaml" )
@@ -544,7 +560,8 @@ if [[ -n "$pod_type" ]]; then
 	fi
 	if [[ "$pod_type" == "gpu1" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.runtimeClassName = \"nvidia\"" ) <<< "$modified_yaml" )
-		#modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.\"nvidia.com/gpu\" = 1" ) <<< "$modified_yaml" )
+		# Dedicated GPUs, assigned by the NVIDIA device plugin (system_yaml/nvidia-device-plugin.yaml)
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.\"nvidia.com/gpu\" = 1" ) <<< "$modified_yaml" )
 		if [[ -n "`echo $modified_yaml | grep CUDA_VISIBLE_DEVICES_NUM`" ]]; then
 			modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= \"1\"" ) <<< "$modified_yaml" )
 		else
@@ -554,7 +571,8 @@ if [[ -n "$pod_type" ]]; then
 	fi
 	if [[ "$pod_type" == "gpu4" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.runtimeClassName = \"nvidia\"" ) <<< "$modified_yaml" )
-		#modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.\"nvidia.com/gpu\" = 4" ) <<< "$modified_yaml" )
+		# Dedicated GPUs, assigned by the NVIDIA device plugin (system_yaml/nvidia-device-plugin.yaml)
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.\"nvidia.com/gpu\" = 4" ) <<< "$modified_yaml" )
 		if [[ -n "`echo $modified_yaml | grep CUDA_VISIBLE_DEVICES_NUM`" ]]; then
 			modified_yaml=$( ( yq -r "(.spec.containers[]?.env[]? | select(.name == \"CUDA_VISIBLE_DEVICES_NUM\") | .value) |= \"4\"" ) <<< "$modified_yaml" )
 		else
