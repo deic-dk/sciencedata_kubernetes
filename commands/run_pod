@@ -525,16 +525,16 @@ modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.\"ephemeral-sto
 ### Add memory and CPU limits
 if [[ -n "$pod_type" ]]; then
 	if [[ "$pod_type" == "small" ]]; then
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"128Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"125m\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"256Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"250m\"" ) <<< "$modified_yaml" )
-	fi
-	if [[ "$pod_type" == "medium" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"256Mi\"" ) <<< "$modified_yaml" )
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"250m\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"512Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"500m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"1Gi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"1000m\"" ) <<< "$modified_yaml" )
+	fi
+	if [[ "$pod_type" == "medium" ]]; then
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"512Mi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"500m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"2Gi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"2000m\"" ) <<< "$modified_yaml" )
 	fi
 	# GPU pods need host memory and CPU in proportion to their GPUs: data loading,
 	# models are staged in host RAM before they go to the GPU, /dev/shm for the
@@ -553,10 +553,10 @@ if [[ -n "$pod_type" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"16000m\"" ) <<< "$modified_yaml" )
 	fi
 	if [[ "$pod_type" == "large" ]]; then
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"1024Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"500m\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"8192Mi\"" ) <<< "$modified_yaml" )
-		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"2000m\"" ) <<< "$modified_yaml" )	
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.memory = \"1Gi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.requests.cpu = \"1000m\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.memory = \"8Gi\"" ) <<< "$modified_yaml" )
+		modified_yaml=$( ( yq -r -y ".spec.containers[].resources.limits.cpu = \"4000m\"" ) <<< "$modified_yaml" )	
 	fi
 	if [[ "$pod_type" == "gpu1" ]]; then
 		modified_yaml=$( ( yq -r -y ".spec.runtimeClassName = \"nvidia\"" ) <<< "$modified_yaml" )
