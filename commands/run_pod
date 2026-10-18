@@ -368,9 +368,12 @@ fi
 pod_base_name="`cat \"$yaml_file\" | yq -r .metadata.name | head -1`"
 pod_name="${pod_base_name}-${owner_str}"
 
-# Try up to 9 times to append to name if pod with this name is already running (i.service/jupyter-fror-dtu-dk-ssh. allow 10 copies per user)
+# Append -1, -2, ... to the name while a pod with that name exists. This is only
+# naming: how many pods a user may run is decided (and explained) by the
+# user_pods app's "Pods per user" setting, so the range here just has to be
+# larger than any sensible cap.
 new_pod_name="${pod_name}"
-for i in {1..9}; do
+for i in {1..99}; do
 	kubectl get pod "$new_pod_name" >& /dev/null
 	if [ $? -eq 0 ]; then
 		new_pod_name="${pod_name}-${i}"
@@ -389,6 +392,7 @@ if [ -z "$public_home_server" ]; then
 	public_home_server=$SCIENCEDATA_PUBLIC_IP
 fi
 
+# HOME_SERVER_PROTOCOL (default https) is what the pod uses towards HOME_SERVER; run_pod.php sets http for the test silos
 # Check if home_server is set, otherwise check if $owner has a home server configured, finally to $SCIENCEDATA_IP
 if [ -z $home_server ]; then
 	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/${GET_USER_SERVER_URI}?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> /dev/null`
@@ -694,6 +698,7 @@ yq -r "(.spec.containers[]?.env[]? | select(.name == \"FILE\") | .value) |= \"$F
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"PEERS\") | .value) |= \"$PEERS\"" | \
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"SETUP_SCRIPT\") | .value) |= \"$SETUP_SCRIPT\"" | \
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
+yq -r "(.spec.containers[]?.env) |= ((. // []) + [{\"name\":\"HOME_SERVER_PROTOCOL\",\"value\":\"${HOME_SERVER_PROTOCOL:-https}\"}])" | \
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"HTTPS_PORT\") | .value) |= \"$reverse_proxy_port\"" | \
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"PUBLIC_HOME_SERVER\") | .value) |= \"$public_home_server\"" | \
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"NFS_VOLUME_PATH\") | .value) |= \"$nfs_volume_path\"" | \

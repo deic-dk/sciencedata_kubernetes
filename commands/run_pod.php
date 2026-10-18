@@ -132,7 +132,7 @@ $cmd = '/bin/bash -c set -o pipefail;' . // use bash with pipefail so the error 
 	(empty($peers) ? '' : ' export PEERS="' . $peers . '";') .
 	(empty($setup_script) ? '' : ' export SETUP_SCRIPT="' . $setup_script . '";') .
 	(!empty($new_sciencedata_ips) && in_array($_SERVER['REMOTE_ADDR'], $new_sciencedata_ips) ? ' export SCIENCEDATA_IP="' . $new_master_ip . '"; export DATA_DIR="' . $new_data_dir . '"; export GET_USER_SERVER_URI="' . $new_get_user_server_uri . '";' : '') .
-	(!empty($test_pods_ips) && in_array($_SERVER['REMOTE_ADDR'], $test_pods_ips) ? ' export SCIENCEDATA_IP="' . $test_master_ip . '"; export DATA_DIR="' . $test_data_dir . '"; export GET_USER_SERVER_URI="' . $test_get_user_server_uri . '";':'') .
+	(!empty($test_pods_ips) && in_array($_SERVER['REMOTE_ADDR'], $test_pods_ips) ? ' export SCIENCEDATA_IP="' . $test_master_ip . '"; export DATA_DIR="' . $test_data_dir . '"; export GET_USER_SERVER_URI="' . $test_get_user_server_uri . '"; export HOME_SERVER_PROTOCOL="http";':'') .
 	' run_pod ' . 
 	' -o "' . $owner . '"' .
 	' -s "' . $_SERVER['REMOTE_ADDR'] . '"' .
