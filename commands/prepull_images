@@ -1,0 +1,94 @@
+#!/bin/bash
+# prepull_images - pull container images onto the worker nodes ahead of use.
+#
+# A pod whose image is not cached on its node waits for the pull first; for the
+# notebook images (15-30 GB) that is 20 minutes or more, and a user concludes the
+# service is broken. Run this after an image has been rebuilt and pushed, and
+# from cron, so the first start is never a pull.
+#
+# Usage:  prepull_images [-l key=value] [-t seconds] [image ...]
+#   -l   node label selector; only nodes matching it pull (default: prepull=yes,
+#        so label the nodes meant for user pods: kubectl label node worker1 prepull=yes)
+#   -t   seconds to wait per image before giving up (default 3600)
+#   images: docker images (e.g. sciencedata/jupyter_sciencedata_custom); with no
+#        arguments the list in /usr/local/etc/kube/prepull_images.txt is used (one
+#        image per line, # comments allowed).
+#
+# How: for each image a short-lived DaemonSet runs a sleeping container from
+# that image with imagePullPolicy Always on the selected nodes; once every one
+# of its pods is Running the image is on every node, and the DaemonSet is deleted
+# (the image stays in the node's cache). Images are handled one at a time so the
+# registry and the network are not hammered.
+
+export KUBECONFIG=${KUBECONFIG:-/etc/kubernetes/admin.conf}
+LIST_FILE=/usr/local/etc/kube/prepull_images.txt
+selector="prepull=yes"
+timeout=3600
+while getopts "l:t:h" opt; do
+	case $opt in
+		l) selector="$OPTARG" ;;
+		t) timeout="$OPTARG" ;;
+		*) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	esac
+done
+shift $((OPTIND - 1))
+
+images=("$@")
+if [ ${#images[@]} -eq 0 ]; then
+	if [ ! -r "$LIST_FILE" ]; then
+		echo "No images given and $LIST_FILE not found" >&2
+		exit 1
+	fi
+	mapfile -t images < <(sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$LIST_FILE" | grep -v '^$')
+fi
+
+key="${selector%%=*}"; value="${selector#*=}"
+nodes=$(kubectl get nodes -l "$selector" --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null)
+if [ -z "$nodes" ]; then
+	echo "No node carries the label $selector - label the nodes for user pods first, e.g.: kubectl label node worker1 prepull=yes" >&2
+	exit 1
+fi
+echo "Pulling ${#images[@]} image(s) onto: $(echo $nodes | tr '\n' ' ')"
+
+rc=0
+for image in "${images[@]}"; do
+	name="prepull-$(echo -n "$image" | tr -c 'a-z0-9' '-' | sed 's/-*$//' | cut -c1-50)"
+	kubectl delete daemonset "$name" --ignore-not-found >/dev/null 2>&1
+	kubectl apply -f - >/dev/null <<YAML
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: $name
+  labels: {app: prepull}
+spec:
+  selector: {matchLabels: {app: prepull, name: $name}}
+  template:
+    metadata:
+      labels: {app: prepull, name: $name}
+    spec:
+      nodeSelector: {"$key": "$value"}
+      terminationGracePeriodSeconds: 1
+      containers:
+      - name: pull
+        image: $image
+        imagePullPolicy: Always
+        command: ["sleep", "infinity"]
+        resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+YAML
+	start=$(date +%s); ok=0
+	while [ $(( $(date +%s) - start )) -lt "$timeout" ]; do
+		want=$(kubectl get daemonset "$name" -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null)
+		ready=$(kubectl get daemonset "$name" -o jsonpath='{.status.numberReady}' 2>/dev/null)
+		if [ -n "$want" ] && [ "$want" != "0" ] && [ "$want" = "$ready" ]; then ok=1; break; fi
+		sleep 10
+	done
+	if [ $ok -eq 1 ]; then
+		echo "$image: on all $want node(s) after $(( $(date +%s) - start )) s"
+	else
+		echo "$image: NOT complete after $timeout s ($ready of $want nodes); pods:" >&2
+		kubectl get pods -l "name=$name" -o wide --no-headers >&2
+		rc=1
+	fi
+	kubectl delete daemonset "$name" --ignore-not-found >/dev/null 2>&1
+done
+exit $rc

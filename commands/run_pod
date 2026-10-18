@@ -74,11 +74,20 @@ dryrun=
 
 #### Define slow functions to run in background after successful pod creation
 start_reverse_proxy() {
-	# Wait for two minutes for pod to start
-	for i in {1..12}; do
-		# Find local IP
-		pod_ip=$(kubectl get pod "$pod_name" -o json | jq -r '.status.podIP' | sed 's|null||')
+	# Wait (up to an hour) for the pod to get an address. A pod can sit in Pending
+	# for a long time (volume claim not bound yet, node cordoned, big image pull);
+	# two minutes was not enough and left pods without a proxy. Stop if it is gone.
+	for i in {1..360}; do
+		pod_json=$(kubectl get pod "$pod_name" -o json 2>/dev/null) || { echo "INFO: pod $pod_name is gone, not starting a reverse proxy" >> "$logfile"; exit 0; }
+		pod_ip=$(echo "$pod_json" | jq -r '.status.podIP' | sed 's|null||')
 		if [[ -n "$pod_ip" ]]; then
+			# A proxy left over from an earlier pod of the same name (delete_pod
+			# missed it, or the pod died without one) holds the port: stop it first.
+			for pid in `pgrep -f "caddy run .*--config ${TMPDIR}/Caddyfile-[0-9.]+-[0-9]+-${pod_name}( |\$)"`; do
+				[[ "`cat /proc/$pid/comm 2>/dev/null`" == "caddy" ]] || continue
+				echo "INFO: Stopping stale caddy proxy pid $pid for $pod_name" >> "$logfile"
+				kill "$pid"
+			done
 			rm ${TMPDIR}/uri-${pod_name} 2>&1 >> "$logfile"
 			echo "INFO: Running reverse proxy caddy reverse-proxy --from https://kube.sciencedata.dk:$reverse_proxy_port --to ${pod_ip}:${pod_http_port}" >> "$logfile"
 			caddyfile="$TMPDIR/Caddyfile-${pod_ip}-${reverse_proxy_port}-${pod_name}"
@@ -91,7 +100,18 @@ start_reverse_proxy() {
 			sed -i "s|PODIP|$pod_ip|" "$caddyfile"
 			sed -i "s|PODPORT|$pod_http_port|" "$caddyfile"
 			export PATH=/bin/:/usr/bin:/usr/local/bin
-			caddy run --adapter caddyfile --config "$caddyfile" &>> "${caddyfile}.log" &
+			# The proxy must run as the caddy user: the certificate for
+			# kube.sciencedata.dk lives in that user's caddy storage
+			# (/var/lib/caddy/.local/share/caddy). Started as root - run_pod from a
+			# root shell - caddy finds no certificate, tries ACME for every pod and
+			# answers each handshake with "internal error" meanwhile.
+			touch "${caddyfile}.log"
+			if [[ "`id -un`" == "caddy" ]]; then
+				caddy run --adapter caddyfile --config "$caddyfile" &>> "${caddyfile}.log" &
+			else
+				chown caddy:caddy "$caddyfile" "${caddyfile}.log"
+				sudo -u caddy bash -c "caddy run --adapter caddyfile --config '$caddyfile' &>> '${caddyfile}.log' &"
+			fi
 			kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>>"$logfile" > ${TMPDIR}/uri-${pod_name}
 			break
 		fi

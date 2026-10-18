@@ -1,0 +1,7 @@
+# Images to keep cached on the user-pod nodes (prepull_images, cron). One per line.
+sciencedata/jupyter_sciencedata_custom
+sciencedata/jupyter_sciencedata_genepattern
+sciencedata/jupyter_sciencedata_pytorch
+sciencedata/jupyter_sciencedata_tensorflow:2.15.0
+sciencedata/jupyter_sciencedata_tensorflow:2.17.0
+sciencedata/ubuntu_noble_sciencedata

@@ -58,15 +58,13 @@ ssh_port=`kubectl get services --all-namespaces | grep " NodePort " | grep " $po
 # every pod's rules
 if [ -n "$ssh_port" ]; then
 
-	# Check if DROP rule exists and create if not - only if $allowed_ips is not empty
-	sudo iptables -t raw -S PREROUTING | grep DROP | grep "dport $ssh_port"
-	if [ $? -ne 0 ]; then
-		$run sudo iptables -t raw -A PREROUTING -p tcp --dport $ssh_port -j DROP
+	# An empty $allowed_ips means "allow all": no DROP rule for the port. Otherwise
+	# the DROP rule must exist (the ACCEPT rules below are inserted in front of it).
+	sudo iptables -t raw -S PREROUTING | grep DROP | grep "dport $ssh_port" > /dev/null
+	if [ -z "$allowed_ips" ]; then
+		[ $? -eq 0 ] && $run sudo iptables -t raw -D PREROUTING -p tcp --dport $ssh_port -j DROP
 	else
-		# If $allowed_ips is empty we'll allow all
-		if [ -z "$allowed_ips" ]; then
-			$run sudo iptables -t raw -D PREROUTING -p tcp --dport $ssh_port -j DROP
-		fi
+		[ $? -ne 0 ] && $run sudo iptables -t raw -A PREROUTING -p tcp --dport $ssh_port -j DROP
 	fi
 
 	# Delete ACCEPT rules for this port
@@ -91,15 +89,17 @@ fi
 sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | grep . | \
 while read extra_port; do
 
-	# Check if DROP rules exists and create if not
-	sudo iptables -t raw -S PREROUTING | grep DROP | grep '\-p tcp' | grep "dport $extra_port "
-	if [ $? -ne 0 ]; then
-		$run sudo iptables -t raw -A PREROUTING -p tcp --dport $extra_port -j DROP
-	fi
-	sudo iptables -t raw -S PREROUTING | grep DROP | grep '\-p udp' | grep "dport $extra_port "
-	if [ $? -ne 0 ]; then
-		$run sudo iptables -t raw -A PREROUTING -p udp --dport $extra_port -j DROP
-	fi
+	# An empty $allowed_ips means "allow all": no DROP rules for the port (clearing
+	# the restriction used to delete only the ACCEPT rules and leave the DROP, which
+	# locked everyone out - silo1 2026-10-13). Otherwise the DROP rules must exist.
+	for proto in tcp udp; do
+		sudo iptables -t raw -S PREROUTING | grep DROP | grep "\-p $proto" | grep "dport $extra_port " > /dev/null
+		if [ -z "$allowed_ips" ]; then
+			[ $? -eq 0 ] && $run sudo iptables -t raw -D PREROUTING -p $proto --dport $extra_port -j DROP
+		else
+			[ $? -ne 0 ] && $run sudo iptables -t raw -A PREROUTING -p $proto --dport $extra_port -j DROP
+		fi
+	done
 	
 	# Delete ACCEPT rules for this port
 	# E.g. iptables -t raw -I PREROUTING -p tcp --dport $extra_port -s $allowed_ip -j ACCEPT

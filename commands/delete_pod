@@ -46,20 +46,24 @@ if [ -n "$user" ]; then
 fi
 
 stop_reverse_proxy() {
-	ip="${podInfo[3]}"
-	port="${podInfo[10]}"
 	echo "ip: ${podInfo[3]}" >> "$logfile"
 	echo "owner: ${podInfo[5]}" >> "$logfile"
 	echo "port: ${podInfo[10]}" >> "$logfile"
-	if [[ -n "$ip" ]]; then
-		pid=`ps auxw | grep -E "caddy run .*\-\-config ${TMPDIR}/Caddyfile-${ip}-.*"  | grep -v grep | awk '{print $2}'`
-		if [[ -n $pid ]]; then
-			$run kill "$pid"
-			rm "$TMPDIR/Caddyfile-${ip}-"* >> "$logfile" 2>&1
-			rm "$TMPDIR/uri-${pod_name}"  >& /dev/null
-			echo "INFO: Stopped caddy proxy $TMPDIR/Caddyfile-${ip}-, $TMPDIR/uri-${pod_name}..." >> "$logfile"
-		fi
-	fi
+	# Stop every proxy that belongs to this pod NAME, whatever address the pod had,
+	# and whether or not the pod still exists: a proxy left over from an earlier
+	# incarnation (other pod IP) keeps the port, and the next launch under the same
+	# name fails with "address already in use". The Caddyfile is named
+	# Caddyfile-<pod ip>-<port>-<pod name>. A ps/pgrep match can include a shell
+	# that carries the same string, so each pid is checked to be a caddy.
+	for pid in `pgrep -f "caddy run .*--config ${TMPDIR}/Caddyfile-[0-9.]+-[0-9]+-${pod_name}( |\$)"`; do
+		[[ "`cat /proc/$pid/comm 2>/dev/null`" == "caddy" ]] || continue
+		echo "INFO: Stopping caddy proxy pid $pid, `tr '\0' ' ' < /proc/$pid/cmdline | grep -o 'Caddyfile-[^ ]*'`" >> "$logfile"
+		$run kill "$pid"
+	done
+	for f in "$TMPDIR"/Caddyfile-*-"${pod_name}" "$TMPDIR"/Caddyfile-*-"${pod_name}".log; do
+		[[ "$f" =~ /Caddyfile-[0-9.]+-[0-9]+-${pod_name}(\.log)?$ ]] && $run rm -f "$f"
+	done
+	$run rm -f "$TMPDIR/uri-${pod_name}"
 }
 
 stop_ssh_service() {
