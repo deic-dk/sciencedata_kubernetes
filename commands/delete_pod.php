@@ -2,10 +2,8 @@
 
 // curl '10.0.0.12/delete_pod.php?user_id=fror@dtu.dk&pod=ubuntu-focal-fror-dtu-dk'
 
-if(strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0){
-	header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
-	exit;
-}
+require_once __DIR__ . '/trusted_source.php';
+sciencedata_require_trusted_source();
 
 $_GET = array_map(function($x){return escapeshellcmd($x);}, $_GET);
 

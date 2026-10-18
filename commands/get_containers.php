@@ -3,10 +3,8 @@
 // curl '10.0.0.12/get_containers.php?user_id=fror@dtu.dk&pod_ip=10.2.x.y'
 
 // We only allow requests from the silos
-if(strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0){
-	header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
-	exit;
-}
+require_once __DIR__ . '/trusted_source.php';
+sciencedata_require_trusted_source();
 
 $passwordFile = "/root/.get_containers_passwd";
 

@@ -1,9 +1,9 @@
 <?php
 
 $logFile = "/var/log/kube.log";
-$admins = ['cloud', 'fror@dtu.dk'];
-// Allow test pods on the 10.2 network
-$test_pods_ips = ['10.2.164.63', '10.2.24.238', '10.2.164.64'];
+// $admins and the test silos (Nextcloud dev pods on the 10.2 network, resolved live): see trusted_source.php
+require_once __DIR__ . '/trusted_source.php';
+$test_pods_ips = sciencedata_test_pods_ips();
 $new_sciencedata_ips = ['10.0.0.20', '10.0.0.21', '10.0.0.22'];
 $new_master_ip = '10.0.0.20';
 $new_data_dir = 'nextcloud';
@@ -21,12 +21,8 @@ file_put_contents($logFile,  "GET: ".serialize($_GET). "\n", FILE_APPEND);
 
 // curl '10.0.0.12/run_pod.php?user_id=fror@dtu.dk&mount_path=www&public_key=ssh-rsa%20AAAAB3NzaC1yc2EAAAABIwAAAIEA1lUNAcCuUvl2nxu0ILt0zfdESUmOGlktcDbv8ufRcJ6A1oYDksn%2BFHxxWU3X7laD7dfF9BBkLr5nC3M7ZuuoW1j2QcHcdFRSfTSLuSYM%2FebHdR5g65gGJWrc8qCaFEWS2unLz6rbCqtKBscQDsLtosIXx1brOmWFATWm%2FuCvABc%3D%20frederik%40pcitapi34&yaml_uri=/files/tmp/ubuntu_sciencedata.yaml'
 
-// We only allow requests from trusted IPs
-if(empty($_SERVER['REMOTE_ADDR']) || strpos($_SERVER['REMOTE_ADDR'], '10.0')!==0 &&
-		!in_array($_SERVER['REMOTE_ADDR'], $test_pods_ips)){
-	empty($_SERVER['SERVER_PROTOCOL'])?"":header($_SERVER['SERVER_PROTOCOL'] . " 403 Forbidden", true, 403);
-	exit;
-}
+// We only allow requests from trusted IPs (ScienceData servers and the test silos)
+sciencedata_require_trusted_source();
 
 // W/o this, GET parameters could contain shell commands wrapped in ``
 // - which would get passed to the called shell script - and executed
