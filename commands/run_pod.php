@@ -39,7 +39,8 @@ $peers = empty($_GET['peers'])?"":$_GET['peers']; // Pod peers of the form host1
 $setup_script = empty($_GET['setup_script'])?"":$_GET['setup_script']; // Setup script to run inside pod
 $yaml_url = $_GET['yaml_url']; // URL of the YAML file to apply - read using the supplied user ID if it starts with
 															// /shared/, /files/, /group/, /sharingin/, /storage/, otherwise read with admin privileges (system/app file).
-$pod_type = empty($_GET['pod_type'])?"":$_GET['pod_type']; // Pod peers of the form host1:ip1,host2:ip2,...
+$pod_type = empty($_GET['pod_type'])?"":$_GET['pod_type']; // Pod type: small, medium, large, gpu1, ...
+$guest = empty($_GET['guest'])?"":"1"; // Guest pod: no home server (anonymous "Run this notebook")
 
 if(empty($owner)){
 	header($_SERVER['SERVER_PROTOCOL'] . " 500 Internal Server Error", true, 500);
@@ -131,6 +132,7 @@ $cmd = '/bin/bash -c set -o pipefail;' . // use bash with pipefail so the error 
 	(empty($file) ? '' : ' export FILE="' . $file . '";') .
 	(empty($peers) ? '' : ' export PEERS="' . $peers . '";') .
 	(empty($setup_script) ? '' : ' export SETUP_SCRIPT="' . $setup_script . '";') .
+	(empty($guest) ? '' : ' export SCIENCEDATA_GUEST="1";') .
 	(!empty($new_sciencedata_ips) && in_array($_SERVER['REMOTE_ADDR'], $new_sciencedata_ips) ? ' export SCIENCEDATA_IP="' . $new_master_ip . '"; export DATA_DIR="' . $new_data_dir . '"; export GET_USER_SERVER_URI="' . $new_get_user_server_uri . '";' : '') .
 	(!empty($test_pods_ips) && in_array($_SERVER['REMOTE_ADDR'], $test_pods_ips) ? ' export SCIENCEDATA_IP="' . $test_master_ip . '"; export DATA_DIR="' . $test_data_dir . '"; export GET_USER_SERVER_URI="' . $test_get_user_server_uri . '"; export HOME_SERVER_PROTOCOL="http";':'') .
 	' run_pod ' . 

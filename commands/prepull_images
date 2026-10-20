@@ -7,8 +7,9 @@
 # from cron, so the first start is never a pull.
 #
 # Usage:  prepull_images [-l key=value] [-t seconds] [image ...]
-#   -l   node label selector; only nodes matching it pull (default: prepull=yes,
-#        so label the nodes meant for user pods: kubectl label node worker1 prepull=yes)
+#   -l   node label selector; only nodes matching it pull. Default: every node
+#        that can run pods, i.e. Ready and without a NoSchedule taint (so the
+#        master is included once it is untainted - it can be a worker like any other).
 #   -t   seconds to wait per image before giving up (default 3600)
 #   images: docker images (e.g. sciencedata/jupyter_sciencedata_custom); with no
 #        arguments the list in /usr/local/etc/kube/prepull_images.txt is used (one
@@ -22,7 +23,7 @@
 
 export KUBECONFIG=${KUBECONFIG:-/etc/kubernetes/admin.conf}
 LIST_FILE=/usr/local/etc/kube/prepull_images.txt
-selector="prepull=yes"
+selector=""
 timeout=3600
 while getopts "l:t:h" opt; do
 	case $opt in
@@ -42,13 +43,18 @@ if [ ${#images[@]} -eq 0 ]; then
 	mapfile -t images < <(sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$LIST_FILE" | grep -v '^$')
 fi
 
-key="${selector%%=*}"; value="${selector#*=}"
-nodes=$(kubectl get nodes -l "$selector" --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null)
-if [ -z "$nodes" ]; then
-	echo "No node carries the label $selector - label the nodes for user pods first, e.g.: kubectl label node worker1 prepull=yes" >&2
-	exit 1
+if [ -n "$selector" ]; then
+	key="${selector%%=*}"; value="${selector#*=}"
+	nodes=$(kubectl get nodes -l "$selector" --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null)
+	[ -z "$nodes" ] && { echo "No node carries the label $selector" >&2; exit 1; }
+else
+	# every node a pod can be scheduled on: Ready and without a NoSchedule taint
+	nodes=$(kubectl get nodes -o json | jq -r '.items[] | select(([.spec.taints[]? | select(.effect == "NoSchedule")] | length) == 0) | select(any(.status.conditions[]; .type == "Ready" and .status == "True")) | .metadata.name')
+	[ -z "$nodes" ] && { echo "No schedulable node found" >&2; exit 1; }
 fi
 echo "Pulling ${#images[@]} image(s) onto: $(echo $nodes | tr '\n' ' ')"
+node_selector_line=""
+[ -n "$selector" ] && node_selector_line="      nodeSelector: {\"$key\": \"$value\"}"
 
 rc=0
 for image in "${images[@]}"; do
@@ -66,7 +72,7 @@ spec:
     metadata:
       labels: {app: prepull, name: $name}
     spec:
-      nodeSelector: {"$key": "$value"}
+$node_selector_line
       terminationGracePeriodSeconds: 1
       containers:
       - name: pull

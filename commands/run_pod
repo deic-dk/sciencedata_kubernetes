@@ -385,6 +385,15 @@ if [ -n "$new_pod_name" ] && [ "$new_pod_name" != "$pod_name" ]; then
 	pod_name="$new_pod_name"
 fi
 
+# Guest pod (SCIENCEDATA_GUEST=1, exported by run_pod.php for anonymous "Run this
+# notebook" pods): no home server at all - no lookups, no HOME_SERVER, no mounts.
+if [ -n "$SCIENCEDATA_GUEST" ]; then
+	echo "Guest pod: no home server" >> "$logfile"
+	home_server=""
+	public_home_server=""
+	nfs_storage_path=""
+	nfs_files_path=""
+else
 # Check if $owner has a public home server configured, otherwise set to $SCIENCEDATA_PUBLIC_IP
 public_home_server=`curl --insecure "https://${SCIENCEDATA_IP}/${GET_USER_SERVER_URI}?user_id=${owner}&internal=no" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2>> "$logfile"`
 echo "Home server: $public_home_server" >> "$logfile"
@@ -396,6 +405,7 @@ fi
 # Check if home_server is set, otherwise check if $owner has a home server configured, finally to $SCIENCEDATA_IP
 if [ -z $home_server ]; then
 	home_server=`curl --insecure "https://${SCIENCEDATA_IP}/${GET_USER_SERVER_URI}?user_id=${owner}&internal=yes" | sed 's|\\/|/|g' | jq -r '.url' | grep -E 'https*://' | sed -E 's|^https*://||' 2> /dev/null`
+fi
 fi
 
 if [[ -n "$nfs_storage_path" || -n "$nfs_files_path" ]]; then
@@ -699,6 +709,7 @@ yq -r "(.spec.containers[]?.env[]? | select(.name == \"PEERS\") | .value) |= \"$
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"SETUP_SCRIPT\") | .value) |= \"$SETUP_SCRIPT\"" | \
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"HOME_SERVER\") | .value) |= \"$my_home_server\"" | \
 yq -r "(.spec.containers[]?.env) |= ((. // []) + [{\"name\":\"HOME_SERVER_PROTOCOL\",\"value\":\"${HOME_SERVER_PROTOCOL:-https}\"}])" | \
+( [ -z "$SCIENCEDATA_GUEST" ] && cat || yq -r "(.spec.containers[]?.env) |= ((. // []) + [{\"name\":\"SCIENCEDATA_GUEST\",\"value\":\"1\"}])" ) | \
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"HTTPS_PORT\") | .value) |= \"$reverse_proxy_port\"" | \
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"PUBLIC_HOME_SERVER\") | .value) |= \"$public_home_server\"" | \
 yq -r "(.spec.containers[]?.env[]? | select(.name == \"NFS_VOLUME_PATH\") | .value) |= \"$nfs_volume_path\"" | \
