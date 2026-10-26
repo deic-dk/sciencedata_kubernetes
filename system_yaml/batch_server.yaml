@@ -55,7 +55,10 @@ kind: Service
 metadata:
   name: batch
 spec:
-  type: NodePort
+  # Cluster-internal only: kube's Caddy (batch.sciencedata.dk), the Nextcloud
+  # nodes and the workers all reach it as batch:443. A NodePort also opened it on
+  # every node's own addresses, which nothing uses.
+  type: ClusterIP
   selector:
     app: batch
   ports:
