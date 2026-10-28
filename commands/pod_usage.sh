@@ -21,11 +21,13 @@ BILLING_DAY_URL="https://sciencedata.dk/apps/files_accounting/billingday.php"
 
 if [ -z "$BILLING_DAY" ]; then
   # If BILLING_DAY not set, set it to the sciencedata billing day minus 1
-  billingday=`curl $BILLING_DAY_URL`
-  if [ -n "$billingday" -a $billingday -gt 1 ]; then
+  billingday=`curl -s --max-time 20 $BILLING_DAY_URL`
+  if [[ "$billingday" =~ ^[0-9]+$ && $billingday -gt 1 ]]; then
     BILLING_DAY=$billingday
   fi
 fi
+# Fall back to the default billing day if the URL could not be read
+BILLING_DAY=${BILLING_DAY:-26}
 
 
 terminating=1
@@ -58,7 +60,9 @@ DIR="$(dirname "$(readlink -f "$0")")"
 
 # Report on specific pod to home silo
 function usage_report() {
-  line=("$@")
+  local line=("$@")
+  # Per pod - must not carry over from the previous pod in the loop
+  local start_time="" end_time="" pod_uid="" 
   # Output from get_containers:
   ## pod_name|container_name|image_name|pod_ip|node_ip|owner|age|status|ssh_port|ssh_username|https_port|uri
   # Report to home silo:
@@ -74,12 +78,15 @@ function usage_report() {
   year=`date +%Y`
   last_month=`date --date="$(date +%Y-%m-15) -1 month" +'%-m'`
   now_day_no=`date +%-d`
-  # If we're running this, say the 30/10 with BILLING_DAY 26,
-  # we'll count 4 days of usage in this month's file.
-  # To bill a month of use, either run it the 26th or change BILLING_DAY.
-  # 
+  # Usage is counted from billing day to billing day. The billing run on BILLING_DAY
+  # of month M reads the file of month M and takes the last report per pod from before
+  # 0:00 that day. So from BILLING_DAY on, reports belong to the NEXT month's file -
+  # e.g. a pod that runs 27/10-29/10 is billed on 26/11, not lost.
   if [[ $now_day_no -ge $BILLING_DAY ]]; then
     last_billing_date=`date --date="$(date +%Y-%m-$BILLING_DAY)"`
+    next_month=`date --date="$(date +%Y-%m-15) +1 month" +%Y-%-m`
+    year=${next_month%-*}
+    month_no=${next_month#*-}
   else
     last_billing_date=`date --date="$(date +%Y-$last_month-$BILLING_DAY)"`
   fi
@@ -108,6 +115,13 @@ function usage_report() {
   if [[ -z "$home_server" || "$home_server" == "null" ]]; then
     echo "No HOME_SERVER for pod/$pod_name"
     return
+  fi
+
+  # The billing run keeps only the last report per pod name. Append the pod's UID, so a
+  # deleted and re-created pod with the same name is accounted as a separate pod.
+  pod_uid=`kubectl get pod/$pod_name -o jsonpath='{.metadata.uid}' 2>/dev/null`
+  if [[ -n "$pod_uid" ]]; then
+    pod_name="$pod_name/$pod_uid"
   fi
 
   home_server=`echo $home_server | sed -E 's|^10\.2.|10.0.|'`

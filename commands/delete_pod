@@ -195,6 +195,10 @@ stop_reverse_proxy &>> "$logfile" &
 # start slow process
 remove_persistent_volumes &>> "$logfile" &
 
+# Report the pod's running time to the owner's home server before it disappears -
+# synchronously, as pod_usage.sh reads the pod's spec
+"$DIR/pod_usage.sh" -t ${run:+-d} ${user:+-u "$user"} -p "$pod_name" &>> "$logfile"
+
 # Now we can delete the pod
 echo "INFO: Deleting pod $pod_name" >> "$logfile"
 remove_ssh_firewall_rules >> "$logfile"
