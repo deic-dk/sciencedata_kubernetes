@@ -128,7 +128,7 @@ function usage_report() {
   accounting_endpoint="https://$home_server/apps/files_accounting/report_pod_usage.php"
 
   # POST the data
-  $run curl --insecure --data "user=$user&node_name=$node_name&image_name=$image_name&node_ip=$node_ip&pod_name=$pod_name&pod_ip=$pod_ip&start_time=$start_time&end_time=$end_time&running_seconds=$running_seconds&year=$year&month=$month_no&day=$now_day_no&cycle_day=$BILLING_DAY" "$accounting_endpoint"
+  $run curl --insecure --connect-timeout 5 --max-time 20 --data "user=$user&node_name=$node_name&image_name=$image_name&node_ip=$node_ip&pod_name=$pod_name&pod_ip=$pod_ip&start_time=$start_time&end_time=$end_time&running_seconds=$running_seconds&year=$year&month=$month_no&day=$now_day_no&cycle_day=$BILLING_DAY" "$accounting_endpoint"
 }
 
 if [[ -n "$pod" ]]; then

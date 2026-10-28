@@ -331,7 +331,8 @@ owner_str=`echo $owner | sed 's|[@._]|-|g'`
 
 user_allowed=1
 
-if [[ ( "$yaml_user" == "" || "$yaml_user" == "null" ) && ( "$yaml_domain" == "" ||  "$yaml_domain" == "null" ) && ( "$yaml_group" != "" || "$yaml_group" != "null" ) ]]; then
+# Open to everyone only when the manifest names no user, domain or group
+if [[ ( "$yaml_user" == "" || "$yaml_user" == "null" ) && ( "$yaml_domain" == "" ||  "$yaml_domain" == "null" ) && ( "$yaml_group" == "" || "$yaml_group" == "null" ) ]]; then
 	echo "Allowed" >> "$logfile"
 	user_allowed=0
 fi
