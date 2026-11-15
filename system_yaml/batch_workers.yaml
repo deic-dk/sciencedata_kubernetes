@@ -1,0 +1,177 @@
+# The system batch service's workers: Deployments, so Kubernetes restarts them
+# (they were bare pods, started by hand under the 'batch' account). Same settings as
+# those pods. Users who need more start their own workers from Containers; those
+# accept only their owner's jobs unless configured otherwise.
+#
+# Rollout (replace the hand-started pods):
+#   kubectl delete pod batch-worker-batch batch-worker-cuda-batch batch-worker-whisper-batch
+#   kubectl apply -f system_yaml/batch_workers.yaml
+#
+# HOME_SERVER is still the OLD service (10.2.0.13): moving batch's identity to the new
+# service is a separate step (server + workers together).
+---
+# General-purpose worker.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: batch-worker
+  template:
+    metadata:
+      labels:
+        app: batch-worker
+        user: batch          # owner: the home server maps the pod to 'batch' (getkey/getcert by pod IP)
+        types: small-medium-large
+    spec:
+      # peon141/162 (Opteron) lack AVX: PyTorch/whisper and much other job software fail there.
+      nodeSelector:
+        avx-present: "yes"
+      containers:
+      - name: batch-worker
+        image: sciencedata/batch_worker
+        env:
+        - name: USERNAME
+          value: 'gridfactory'
+        - name: SD_UID
+          value: 'batch'
+        - name: HOME_SERVER        # where the worker fetches batch's key/cert (getkey/getcert)
+          value: '10.2.0.13'
+        - name: PUBLIC_HOME_SERVER
+          value: 'sciencedata.dk'
+        - name: HOME_SERVER_PROTOCOL
+          value: 'https'
+        - name: PEERS_IMAGE
+          value: 'sciencedata/batch_server'
+        - name: PEERS              # the system batch server (Service 'batch' - will be replaced with current value by the workers)
+          value: 'batch:10.0.0.110'
+        - name: MY_VOS
+          value: 'https://batch/vos/default.txt'
+        - name: KEY_PASSWORD
+          value: 'grid'
+        - name: UNENCRYPTED_KEY
+          value: 'true'
+        resources:
+          requests:
+            ephemeral-storage: '7Gi'
+          limits:
+            ephemeral-storage: '50Gi'
+        securityContext:
+          capabilities:
+            add: ['SYS_CHROOT', 'AUDIT_WRITE', 'NET_ADMIN']
+---
+# CUDA worker with whisper (GPU-enabled ffmpeg + OpenAI whisper). Holds one GPU, which also
+# schedules it on the GPU node (worker1).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch-worker-cuda
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: batch-worker-cuda
+  template:
+    metadata:
+      labels:
+        app: batch-worker-cuda
+        user: batch          # owner: the home server maps the pod to 'batch' (getkey/getcert by pod IP)
+        types: small-medium-large-gpu1-gpu4
+    spec:
+      # peon141/162 (Opteron) lack AVX: PyTorch/whisper and much other job software fail there.
+      nodeSelector:
+        avx-present: "yes"
+      # The nvidia runtime mounts the assigned GPU and driver into the container.
+      runtimeClassName: nvidia
+      containers:
+      - name: batch-worker-cuda
+        image: sciencedata/batch_worker_cuda_whisper
+        env:
+        - name: USERNAME
+          value: 'gridfactory'
+        - name: SD_UID
+          value: 'batch'
+        - name: HOME_SERVER        # where the worker fetches batch's key/cert (getkey/getcert)
+          value: '10.2.0.13'
+        - name: PUBLIC_HOME_SERVER
+          value: 'sciencedata.dk'
+        - name: HOME_SERVER_PROTOCOL
+          value: 'https'
+        - name: PEERS_IMAGE
+          value: 'sciencedata/batch_server'
+        - name: PEERS              # the system batch server (Service 'batch' - will be replaced with current value by the workers)
+          value: 'batch:10.0.0.110'
+        - name: MY_VOS
+          value: 'https://batch/vos/default.txt'
+        - name: KEY_PASSWORD
+          value: 'grid'
+        - name: UNENCRYPTED_KEY
+          value: 'true'
+        - name: CUDA_VISIBLE_DEVICES_NUM
+          value: '1'
+        resources:
+          requests:
+            ephemeral-storage: '7Gi'
+            nvidia.com/gpu: '1'
+          limits:
+            ephemeral-storage: '50Gi'
+            nvidia.com/gpu: '1'
+        securityContext:
+          capabilities:
+            add: ['SYS_CHROOT', 'AUDIT_WRITE', 'NET_ADMIN']
+---
+# Whisper (speech-to-text) worker - the batch app's whisper job template needs it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch-worker-whisper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: batch-worker-whisper
+  template:
+    metadata:
+      labels:
+        app: batch-worker-whisper
+        user: batch          # owner: the home server maps the pod to 'batch' (getkey/getcert by pod IP)
+        types: small-medium-large
+    spec:
+      # peon141/162 (Opteron) lack AVX: PyTorch/whisper and much other job software fail there.
+      nodeSelector:
+        avx-present: "yes"
+      containers:
+      - name: batch-worker-whisper
+        image: sciencedata/batch_worker_whisper
+        env:
+        - name: USERNAME
+          value: 'gridfactory'
+        - name: SD_UID
+          value: 'batch'
+        - name: HOME_SERVER        # where the worker fetches batch's key/cert (getkey/getcert)
+          value: '10.2.0.13'
+        - name: PUBLIC_HOME_SERVER
+          value: 'sciencedata.dk'
+        - name: HOME_SERVER_PROTOCOL
+          value: 'https'
+        - name: PEERS_IMAGE
+          value: 'sciencedata/batch_server'
+        - name: PEERS              # the system batch server (Service 'batch' - will be replaced with current value by the workers)
+          value: 'batch:10.0.0.110'
+        - name: MY_VOS
+          value: 'https://batch/vos/default.txt'
+        - name: KEY_PASSWORD
+          value: 'grid'
+        - name: UNENCRYPTED_KEY
+          value: 'true'
+        resources:
+          requests:
+            ephemeral-storage: '7Gi'
+          limits:
+            ephemeral-storage: '50Gi'
+        securityContext:
+          capabilities:
+            add: ['SYS_CHROOT', 'AUDIT_WRITE', 'NET_ADMIN']
