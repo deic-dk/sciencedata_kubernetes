@@ -129,11 +129,16 @@ start_reverse_proxy() {
 			[[ "$phase" == "Running" ]] && break
 			sleep 10
 		done
-		# Now wait in the background for another 5 minutes for any /tmp/URI to pop up in the container
-		( for i in {1..60}; do
-			# If there's a file /tmp/URI, copy it out to /var/run/sciencedata/uri-${pod_name}
-				sleep 5
-				kubectl exec --stdin ${pod_name} -- cat /tmp/URI 2>>"$logfile" > ${TMPDIR}/uri-${pod_name}
+		# Now wait in the background for any /tmp/URI to pop up in the container (the
+		# path the pod's address is shown with, e.g. a notebook token): every 5 s for
+		# 5 minutes, then every 30 s up to 30 minutes in all - a service may take a
+		# while to come up. Stop early when the container writes /tmp/URI.none (no
+		# path coming) or the pod is gone.
+		( for i in {1..110}; do
+				[[ $i -le 60 ]] && sleep 5 || sleep 30
+				kubectl get pod "$pod_name" >/dev/null 2>&1 || break
+				kubectl exec --stdin ${pod_name} -- sh -c 'cat /tmp/URI 2>/dev/null || { [ -e /tmp/URI.none ] && echo __NONE__; }' 2>>"$logfile" > ${TMPDIR}/uri-${pod_name}
+				grep -q '^__NONE__$' ${TMPDIR}/uri-${pod_name} 2>/dev/null && { rm -f ${TMPDIR}/uri-${pod_name}; break; }
 				[[ -e ${TMPDIR}/uri-${pod_name} ]] && [[ ! -s ${TMPDIR}/uri-${pod_name} ]] && rm ${TMPDIR}/uri-${pod_name}
 				[[ -s ${TMPDIR}/uri-${pod_name} ]] && break
 			done ) 2>&1 >> "$logfile"

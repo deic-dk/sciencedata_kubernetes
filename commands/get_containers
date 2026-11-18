@@ -56,7 +56,7 @@ echo $(kubectl get pods ${labels:+"$labels"} ${ip_selector} --all-namespaces -o 
 'hostIP: .status.hostIP?, '\
 'user: .metadata.labels.user?, '\
 'domain: .metadata.labels.domain?, '\
-'starttime: .status.startTime?, '\
+'starttime: ((.status.containerStatuses[0]?.state.running.startedAt?) // .status.startTime?), '\
 'status: (.status.containerStatuses[]?.state[]? // []) | join(", "), '\
 'state: (if .metadata.deletionTimestamp != null then "Terminating" else .status.phase? end), '\
 'message: .status|(.conditions? // [])|map(select(has("message")).message)[0]?, '\
