@@ -46,8 +46,8 @@ spec:
           value: 'https'
         - name: PEERS_IMAGE
           value: 'sciencedata/batch_server'
-        - name: PEERS              # the system batch server (Service 'batch' - will be replaced with current value by the workers)
-          value: 'batch:10.0.0.110'
+        - name: PEERS  # the system batch server (Service 'batch' - will be replaced with current value by the workers). We set the value to a non-numerical, so configure_worker_node.sh does not add a (stale) entry to /etc/hosts and the correct entry from dns is used to fetch the server certificate
+          value: 'batch:batch'
         - name: MY_VOS
           value: 'https://batch/vos/default.txt'
         - name: KEY_PASSWORD
@@ -102,8 +102,8 @@ spec:
           value: 'https'
         - name: PEERS_IMAGE
           value: 'sciencedata/batch_server'
-        - name: PEERS              # the system batch server (Service 'batch' - will be replaced with current value by the workers)
-          value: 'batch:10.0.0.110'
+        - name: PEERS  # the system batch server (Service 'batch' - will be replaced with current value by the workers). We set the value to a non-numerical, so configure_worker_node.sh does not add a (stale) entry to /etc/hosts and the correct entry from dns is used to fetch the server certificate
+          value: 'batch:batch'
         - name: MY_VOS
           value: 'https://batch/vos/default.txt'
         - name: KEY_PASSWORD
@@ -159,8 +159,8 @@ spec:
           value: 'https'
         - name: PEERS_IMAGE
           value: 'sciencedata/batch_server'
-        - name: PEERS              # the system batch server (Service 'batch' - will be replaced with current value by the workers)
-          value: 'batch:10.0.0.110'
+        - name: PEERS  # the system batch server (Service 'batch' - will be replaced with current value by the workers). We set the value to a non-numerical, so configure_worker_node.sh does not add a (stale) entry to /etc/hosts and the correct entry from dns is used to fetch the server certificate
+          value: 'batch:batch'
         - name: MY_VOS
           value: 'https://batch/vos/default.txt'
         - name: KEY_PASSWORD
