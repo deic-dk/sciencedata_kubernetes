@@ -498,13 +498,17 @@ if [[ -n $pod_http_port ]]; then
 	# Look for a match in $HTTPS_PORTS_FILE. If found, assign nodePort to this - unless
 	# there's already a pod running with this port assigned.
 	echo "Looking for $pod_name: in $HTTPS_PORTS_FILE " >> "$logfile"
-	if [ -n "`grep -E "^$pod_base_name[:-]" "$HTTPS_PORTS_FILE" 2>/dev/null`" ]; then
-		if [ -n "`grep ^$pod_name: "$HTTPS_PORTS_FILE" 2>/dev/null`" ]; then
-			reserved_https_port=`grep ^$pod_name: "$HTTPS_PORTS_FILE" | awk -F: '{print $NF}'`
-		fi
-		if [ -n "`grep ^$pod_base_name: "$HTTPS_PORTS_FILE" 2>/dev/null`" ]; then
-			reserved_https_port=`grep ^$pod_base_name: "$HTTPS_PORTS_FILE" | awk -F: '{print $NF}'`
-		fi
+	# Only an exact reservation counts - for this pod or for the image (base name).
+	# "^$pod_base_name[:-]" also matched other users' pods of the same image
+	# (ubuntu-noble-caddy-tuchr-dtu-dk:2001), and the pod was then left without a port.
+	reserved_https_port=""
+	if [ -n "`grep ^$pod_name: "$HTTPS_PORTS_FILE" 2>/dev/null`" ]; then
+		reserved_https_port=`grep ^$pod_name: "$HTTPS_PORTS_FILE" | awk -F: '{print $NF}'`
+	fi
+	if [ -n "`grep ^$pod_base_name: "$HTTPS_PORTS_FILE" 2>/dev/null`" ]; then
+		reserved_https_port=`grep ^$pod_base_name: "$HTTPS_PORTS_FILE" | awk -F: '{print $NF}'`
+	fi
+	if [ -n "$reserved_https_port" ]; then
 		# Check if somebody's using it
 		if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_https_port/ 2>/dev/null`" ]; then
 			if [ "$reserved_https_port" != 443 -a "$reserved_https_port" != 22 ]; then
@@ -526,8 +530,8 @@ else
 fi
 # Block web access for others than the current client IP - as for SSH and extra ports
 if [[ -n "$allowed_ip" && -n "$reverse_proxy_port" ]]; then
-	$run sudo iptables -t raw -A PREROUTING -p tcp --dport $reverse_proxy_port -j DROP
-	$run sudo iptables -t raw -I PREROUTING -p tcp --dport $reverse_proxy_port -s $allowed_ip -j ACCEPT
+	$run sudo /usr/local/sbin/pod_iptables -t raw -A PREROUTING -p tcp --dport $reverse_proxy_port -j DROP
+	$run sudo /usr/local/sbin/pod_iptables -t raw -I PREROUTING -p tcp --dport $reverse_proxy_port -s $allowed_ip -j ACCEPT
 fi
 
 # This is picked up by start.sh inside the container (for ScienceData-enabled containers)
@@ -670,13 +674,14 @@ if [[ -n $ssh_public_key ]]; then
 		if [ -n "`grep ^$pod_base_name: "$SSH_PORTS_FILE" 2>/dev/null`" ]; then
 			reserved_ssh_port=`grep ^$pod_base_name: "$SSH_PORTS_FILE" | awk -F: '{print $NF}'`
 		fi
-		# Check if somebody's using it
-		if [ -z "`kubectl get -o wide services | grep NodePort | grep :$reserved_ssh_port/ 2>/dev/null`" ]; then
-			if [ "$reserved_ssh_port" != 443 -a "$reserved_ssh_port" != 22 ]; then
-				reverse_proxy_port=$reserved_https_port
-			fi
-		else
+		# Check if somebody's using it - then pick a free port below instead.
+		# (This used to set reverse_proxy_port=$reserved_https_port, a copy from the
+		# https block, which could drop the pod's https port.)
+		if [ -n "`kubectl get -o wide services | grep NodePort | grep :$reserved_ssh_port/ 2>/dev/null`" ]; then
 			echo "Requested port, $reserved_ssh_port, in use" >> "$logfile"
+			reserved_ssh_port=""
+		elif [ "$reserved_ssh_port" = 443 -o "$reserved_ssh_port" = 22 ]; then
+			reserved_ssh_port=""
 		fi
 	fi
 	if [[ -n "$reserved_ssh_port" ]]; then
@@ -700,9 +705,9 @@ if [[ -n $ssh_public_key ]]; then
 	# Block SSH access for others than the current client IP
 	if [[ -n "$allowed_ip" && -n "$ssh_port" ]]; then
 		# Block access from everywhere
-		$run sudo iptables -t raw -A PREROUTING -p tcp --dport $ssh_port -j DROP
+		$run sudo /usr/local/sbin/pod_iptables -t raw -A PREROUTING -p tcp --dport $ssh_port -j DROP
 		# Allow access from $allowed_ip
-		$run sudo iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
+		$run sudo /usr/local/sbin/pod_iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
 	fi
 fi
 
@@ -789,11 +794,11 @@ if [ -n "$pod_extra_ports" ]; then
 				# Block access for others than the current client IP
 				if [[ -n "$allowed_ip" && -n "$node_port" ]]; then
 					# Block access from everywhere
-					$run sudo iptables -t raw -A PREROUTING -p tcp --dport $node_port -j DROP
-					$run sudo iptables -t raw -A PREROUTING -p udp --dport $node_port -j DROP
+					$run sudo /usr/local/sbin/pod_iptables -t raw -A PREROUTING -p tcp --dport $node_port -j DROP
+					$run sudo /usr/local/sbin/pod_iptables -t raw -A PREROUTING -p udp --dport $node_port -j DROP
 					# Allow access from $allowed_ip
-					$run sudo iptables -t raw -I PREROUTING -p tcp --dport $node_port -s $allowed_ip -j ACCEPT
-					$run sudo iptables -t raw -I PREROUTING -p udp --dport $node_port -s $allowed_ip -j ACCEPT
+					$run sudo /usr/local/sbin/pod_iptables -t raw -I PREROUTING -p tcp --dport $node_port -s $allowed_ip -j ACCEPT
+					$run sudo /usr/local/sbin/pod_iptables -t raw -I PREROUTING -p udp --dport $node_port -s $allowed_ip -j ACCEPT
 				fi
 			fi
 		fi

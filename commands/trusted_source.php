@@ -32,7 +32,7 @@ function sciencedata_test_pods_ips(): array {
 		}
 	}
 	global $admins;
-	$out = shell_exec('KUBECONFIG=/etc/kubernetes/admin.conf kubectl get pods --no-headers ' .
+	$out = shell_exec('KUBECONFIG=/etc/kubernetes/pods.conf kubectl get pods --no-headers ' .
 		'-o custom-columns=NAME:.metadata.name,IP:.status.podIP,USER:.metadata.labels.user,DOMAIN:.metadata.labels.domain 2>/dev/null');
 	$ips = [];
 	foreach (preg_split('/\R/', (string)$out) as $line) {

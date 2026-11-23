@@ -63,31 +63,31 @@ if [ -n "$ssh_port" ]; then
 	# (The count is taken before the if: inside it $? would be the [ -z ] test's,
 	# which appended one more DROP on every call and, when clearing, removed only
 	# one of them - leaving the port closed.)
-	drops=`sudo iptables -t raw -S PREROUTING | grep DROP | grep -c "dport $ssh_port "`
+	drops=`sudo /usr/local/sbin/pod_iptables -t raw -S PREROUTING | grep DROP | grep -c "dport $ssh_port "`
 	if [ -z "$allowed_ips" ]; then
 		for i in $(seq 1 $drops); do
-			$run sudo iptables -t raw -D PREROUTING -p tcp --dport $ssh_port -j DROP
+			$run sudo /usr/local/sbin/pod_iptables -t raw -D PREROUTING -p tcp --dport $ssh_port -j DROP
 		done
 	else
 		# Exactly one DROP rule: add it if missing, remove any duplicates
-		[ $drops -eq 0 ] && $run sudo iptables -t raw -A PREROUTING -p tcp --dport $ssh_port -j DROP
+		[ $drops -eq 0 ] && $run sudo /usr/local/sbin/pod_iptables -t raw -A PREROUTING -p tcp --dport $ssh_port -j DROP
 		for i in $(seq 2 $drops); do
-			$run sudo iptables -t raw -D PREROUTING -p tcp --dport $ssh_port -j DROP
+			$run sudo /usr/local/sbin/pod_iptables -t raw -D PREROUTING -p tcp --dport $ssh_port -j DROP
 		done
 	fi
 
 	# Delete ACCEPT rules for this port
 	# E.g. iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
-	sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $ssh_port" | while read line; do
+	sudo /usr/local/sbin/pod_iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $ssh_port" | while read line; do
 		allowed_ip=`echo $line | sed -E 's|.* -s (\S+) .*|\1|'`
 		cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
-		$run sudo iptables $cmd
+		$run sudo /usr/local/sbin/pod_iptables $cmd
 	done
 
 	# Add new rules
 	echo $allowed_ips | sed "s|,|\n|g" | while read allowed_ip; do
 		if [ -n "$allowed_ip" ]; then
-				$run sudo iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
+				$run sudo /usr/local/sbin/pod_iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
 		fi
 	done
 
@@ -102,32 +102,32 @@ while read extra_port; do
 	# the restriction used to delete only the ACCEPT rules and leave the DROP, which
 	# locked everyone out - silo1 2026-10-13). Otherwise the DROP rules must exist.
 	for proto in tcp udp; do
-		drops=`sudo iptables -t raw -S PREROUTING | grep DROP | grep "\-p $proto" | grep -c "dport $extra_port "`
+		drops=`sudo /usr/local/sbin/pod_iptables -t raw -S PREROUTING | grep DROP | grep "\-p $proto" | grep -c "dport $extra_port "`
 		if [ -z "$allowed_ips" ]; then
 			for i in $(seq 1 $drops); do
-				$run sudo iptables -t raw -D PREROUTING -p $proto --dport $extra_port -j DROP
+				$run sudo /usr/local/sbin/pod_iptables -t raw -D PREROUTING -p $proto --dport $extra_port -j DROP
 			done
 		else
-			[ $drops -eq 0 ] && $run sudo iptables -t raw -A PREROUTING -p $proto --dport $extra_port -j DROP
+			[ $drops -eq 0 ] && $run sudo /usr/local/sbin/pod_iptables -t raw -A PREROUTING -p $proto --dport $extra_port -j DROP
 			for i in $(seq 2 $drops); do
-				$run sudo iptables -t raw -D PREROUTING -p $proto --dport $extra_port -j DROP
+				$run sudo /usr/local/sbin/pod_iptables -t raw -D PREROUTING -p $proto --dport $extra_port -j DROP
 			done
 		fi
 	done
 	
 	# Delete ACCEPT rules for this port
 	# E.g. iptables -t raw -I PREROUTING -p tcp --dport $extra_port -s $allowed_ip -j ACCEPT
-	sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $extra_port " | while read line; do
+	sudo /usr/local/sbin/pod_iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $extra_port " | while read line; do
 		allowed_ip=`echo $line | sed -E 's|.* -s (\S+) .*|\1|'`
 		cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
-		$run sudo iptables $cmd
+		$run sudo /usr/local/sbin/pod_iptables $cmd
 	done
 	
 	# Add new rules
 	echo $allowed_ips | sed "s|,|\n|g" | while read allowed_ip; do
 		if [ -n "$allowed_ip" ]; then
-			$run sudo iptables -t raw -I PREROUTING -p tcp --dport $extra_port -s $allowed_ip -j ACCEPT
-			$run sudo iptables -t raw -I PREROUTING -p udp --dport $extra_port -s $allowed_ip -j ACCEPT
+			$run sudo /usr/local/sbin/pod_iptables -t raw -I PREROUTING -p tcp --dport $extra_port -s $allowed_ip -j ACCEPT
+			$run sudo /usr/local/sbin/pod_iptables -t raw -I PREROUTING -p udp --dport $extra_port -s $allowed_ip -j ACCEPT
 		fi
 	done
 

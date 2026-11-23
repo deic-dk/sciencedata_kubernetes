@@ -20,7 +20,7 @@ if(empty($owner) || empty($pod)){
 	exit;
 }
 
-exec('export KUBECONFIG=/etc/kubernetes/admin.conf; set_allowed_ips -u "'.$owner.'"  "'.$pod.'" "'.$ips.'"', $output, $retval);
+exec('export KUBECONFIG=/etc/kubernetes/pods.conf; set_allowed_ips -u "'.$owner.'"  "'.$pod.'" "'.$ips.'"', $output, $retval);
 
 if($retval===0){
 	echo "{\"data\":{\"name\":\"$pod\", ".

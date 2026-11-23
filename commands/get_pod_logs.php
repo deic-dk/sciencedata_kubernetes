@@ -21,7 +21,7 @@ if(empty($owner) || empty($pod)){
 else{
 	$output = [];
 	$ret = "";
-	exec('export KUBECONFIG=/etc/kubernetes/admin.conf; get_pod_logs -u "'.$owner.'" "'.$pod.'"', $output, $ret);
+	exec('export KUBECONFIG=/etc/kubernetes/pods.conf; get_pod_logs -u "'.$owner.'" "'.$pod.'"', $output, $ret);
 	if($ret==0){
 		echo implode("\n", $output);
 	}

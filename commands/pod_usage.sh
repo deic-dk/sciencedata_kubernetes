@@ -8,7 +8,8 @@
 # so noon is probably a good time.
 #
 
-export KUBECONFIG=/etc/kubernetes/admin.conf
+# Called by delete_pod (as the web server, with KUBECONFIG set) and by a monthly root cronjob.
+export KUBECONFIG=${KUBECONFIG:-/etc/kubernetes/admin.conf}
 
 user=""
 run=""

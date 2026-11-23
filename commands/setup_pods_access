@@ -1,0 +1,181 @@
+#!/bin/bash
+#
+# setup_pods_access: give the web server user (caddy) only what the pod scripts need,
+# instead of cluster-admin (a world-readable admin.conf) and unrestricted sudo.
+#
+# Run as root on the kube control-plane node, in two steps:
+#
+#   setup_pods_access            Additive, changes nothing that runs today:
+#                                - service account kube-system/sciencedata-pods with
+#                                  only the rights the pod scripts use (below)
+#                                - /etc/kubernetes/pods.conf (root:caddy 0640), a
+#                                  kubeconfig for that account
+#                                - /usr/local/sbin/pod_iptables (root 0755)
+#   setup_pods_access --lockdown After the pod scripts use pods.conf and pod_iptables:
+#                                - /etc/sudoers.d/caddy: only pod_iptables
+#                                - /etc/kubernetes/admin.conf: 0600
+#
+# Rights (from what run_pod, delete_pod, get_containers, set_allowed_ips,
+# set_port_numbers, get_pod_logs, pod_usage.sh and trusted_source.php do):
+# - read everywhere: pods, services, PVCs, PVs, nodes, namespaces, events,
+#   daemonsets/deployments/replicasets
+# - write in the default namespace only: pods (incl. exec and logs), services, PVCs
+# - write PVs (cluster-scoped, created per pod for its NFS mounts)
+# Not granted: secrets, configmaps, RBAC, anything in kube-system, nodes (write).
+# The account lives in kube-system, so pods created in default cannot mount its token.
+#
+# Root-only jobs (cron: prepull_images, the monthly pod_usage.sh, zenodo and bridge
+# scripts) keep using admin.conf, which root can still read.
+#
+
+set -e
+
+SA=sciencedata-pods
+NS=kube-system
+ADMIN_CONF=/etc/kubernetes/admin.conf
+PODS_CONF=/etc/kubernetes/pods.conf
+WEB_USER=caddy
+HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+
+[ "$(id -u)" -eq 0 ] || { echo "Run as root." >&2; exit 1; }
+export KUBECONFIG=$ADMIN_CONF
+
+if [ "$1" = "--lockdown" ]; then
+	# Refuse while a script run by the web server still needs the old access.
+	left=$(grep -l -E 'KUBECONFIG=/etc/kubernetes/admin\.conf|sudo +iptables' \
+		"$HERE"/*.php "$HERE"/run_pod "$HERE"/delete_pod "$HERE"/get_containers \
+		"$HERE"/set_allowed_ips "$HERE"/set_port_numbers "$HERE"/get_pod_logs 2>/dev/null || true)
+	if [ -n "$left" ]; then
+		echo "Still using admin.conf or 'sudo iptables' - update these first:" >&2
+		echo "$left" >&2
+		exit 1
+	fi
+	[ -s $PODS_CONF ] && [ -x /usr/local/sbin/pod_iptables ] || { echo "Run setup_pods_access without --lockdown first." >&2; exit 1; }
+	new=$(mktemp)
+	cat > "$new" <<EOF
+# The web server (php-fpm runs as $WEB_USER) may only change the pods' firewall rules.
+# Written by setup_pods_access. The previous version is kept as caddy.<date> outside sudoers.d.
+$WEB_USER ALL=(root) NOPASSWD: /usr/local/sbin/pod_iptables
+EOF
+	visudo -c -f "$new" >/dev/null
+	[ -f /etc/sudoers.d/caddy ] && cp -p /etc/sudoers.d/caddy /root/sudoers.d-caddy.$(date +%Y%m%d%H%M%S)
+	install -o root -g root -m 440 "$new" /etc/sudoers.d/caddy
+	rm -f "$new"
+	visudo -c >/dev/null
+	chmod 600 $ADMIN_CONF
+	echo "Locked down: sudoers.d/caddy allows only pod_iptables; $ADMIN_CONF is 0600."
+	exit 0
+fi
+
+kubectl apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: $SA
+  namespace: $NS
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: $SA-token
+  namespace: $NS
+  annotations:
+    kubernetes.io/service-account.name: $SA
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: $SA-read
+rules:
+- apiGroups: [""]
+  resources: [pods, services, persistentvolumeclaims, persistentvolumes, nodes, namespaces, events, endpoints]
+  verbs: [get, list, watch]
+- apiGroups: [apps]
+  resources: [daemonsets, deployments, replicasets]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: $SA-write
+rules:
+- apiGroups: [""]
+  resources: [pods, services, persistentvolumeclaims]
+  verbs: [create, delete, patch, update]
+- apiGroups: [""]
+  resources: [pods/exec]
+  verbs: [create, get]
+- apiGroups: [""]
+  resources: [pods/log]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: $SA-volumes
+rules:
+- apiGroups: [""]
+  resources: [persistentvolumes]
+  verbs: [create, delete, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: $SA-read
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: $SA-read}
+subjects: [{kind: ServiceAccount, name: $SA, namespace: $NS}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: $SA-volumes
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: $SA-volumes}
+subjects: [{kind: ServiceAccount, name: $SA, namespace: $NS}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: $SA-write
+  namespace: default
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: $SA-write}
+subjects: [{kind: ServiceAccount, name: $SA, namespace: $NS}]
+EOF
+
+# The token controller fills in the secret shortly after it is created.
+token=""
+for i in $(seq 1 30); do
+	token=$(kubectl -n $NS get secret $SA-token -o jsonpath='{.data.token}' 2>/dev/null | base64 -d)
+	[ -n "$token" ] && break
+	sleep 1
+done
+[ -n "$token" ] || { echo "No token in secret $NS/$SA-token." >&2; exit 1; }
+
+server=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.server}')
+ca=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+new=$(mktemp)
+chmod 600 "$new"
+cat > "$new" <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- name: kubernetes
+  cluster:
+    server: $server
+    certificate-authority-data: $ca
+users:
+- name: $SA
+  user:
+    token: $token
+contexts:
+- name: $SA
+  context: {cluster: kubernetes, user: $SA, namespace: default}
+current-context: $SA
+EOF
+install -o root -g $WEB_USER -m 640 "$new" $PODS_CONF
+rm -f "$new"
+
+install -o root -g root -m 755 "$HERE/pod_iptables" /usr/local/sbin/pod_iptables
+
+echo "Service account $NS/$SA, $PODS_CONF (root:$WEB_USER 0640) and /usr/local/sbin/pod_iptables are in place."
+echo "Check:  sudo -u $WEB_USER KUBECONFIG=$PODS_CONF kubectl auth can-i --list"

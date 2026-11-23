@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+# pod_iptables: the only iptables access the web server user (caddy) gets via sudo.
+#
+# The pod scripts (run_pod, delete_pod, set_allowed_ips, get_containers) keep each
+# pod port closed except for the pod's allowed addresses, with rules in the raw
+# PREROUTING chain. Running iptables itself via sudo would make caddy root (e.g.
+# --modprobe=<program>), so this wrapper accepts only those rule forms:
+#
+#   pod_iptables -t raw -S PREROUTING
+#   pod_iptables -t raw -A|-I|-D PREROUTING [-s ADDR[/BITS]] -p tcp|udp [-m tcp|udp] --dport PORT -j ACCEPT|DROP
+#
+# (options after the chain in any order, each at most once - as iptables -S prints
+# them, so a listed rule can be deleted by turning its -A into -D), for pod ports
+# only: 2001-2999 (the per-pod https ports) and 30000-32767 (NodePorts).
+#
+# Install as root: install -o root -g root -m 755 pod_iptables /usr/local/sbin/
+# and in /etc/sudoers.d/caddy:  caddy ALL=(root) NOPASSWD: /usr/local/sbin/pod_iptables
+#
+
+IPTABLES=/usr/sbin/iptables
+
+die() {
+	echo "pod_iptables: $*" >&2
+	exit 2
+}
+
+[ "$1" = "-t" ] && [ "$2" = "raw" ] || die "only '-t raw' is allowed"
+shift 2
+
+case "$1" in
+	-S)
+		[ $# -eq 2 ] && [ "$2" = "PREROUTING" ] || die "only '-S PREROUTING' is allowed"
+		exec $IPTABLES -t raw -S PREROUTING
+		;;
+	-A|-I|-D)
+		action="$1"
+		;;
+	*)
+		die "only -S, -A, -I and -D are allowed"
+		;;
+esac
+[ "$2" = "PREROUTING" ] || die "only the PREROUTING chain is allowed"
+shift 2
+
+src=""; proto=""; match=""; dport=""; target=""
+while [ $# -gt 0 ]; do
+	[ $# -ge 2 ] || die "option $1 has no value"
+	case "$1" in
+		-s)
+			[ -z "$src" ] || die "-s given twice"
+			[[ "$2" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[12][0-9]|3[0-2]))?$ ]] || die "bad address '$2'"
+			src="$2"
+			;;
+		-p)
+			[ -z "$proto" ] || die "-p given twice"
+			[ "$2" = "tcp" ] || [ "$2" = "udp" ] || die "bad protocol '$2'"
+			proto="$2"
+			;;
+		-m)
+			[ -z "$match" ] || die "-m given twice"
+			[ "$2" = "tcp" ] || [ "$2" = "udp" ] || die "bad match '$2'"
+			match="$2"
+			;;
+		--dport)
+			[ -z "$dport" ] || die "--dport given twice"
+			[[ "$2" =~ ^[1-9][0-9]{3,4}$ ]] || die "bad port '$2'"
+			if ! { [ "$2" -ge 2001 ] && [ "$2" -le 2999 ]; } && ! { [ "$2" -ge 30000 ] && [ "$2" -le 32767 ]; }; then
+				die "port $2 is not a pod port"
+			fi
+			dport="$2"
+			;;
+		-j)
+			[ -z "$target" ] || die "-j given twice"
+			[ "$2" = "ACCEPT" ] || [ "$2" = "DROP" ] || die "bad target '$2'"
+			target="$2"
+			;;
+		*)
+			die "option '$1' is not allowed"
+			;;
+	esac
+	shift 2
+done
+
+[ -n "$proto" ] && [ -n "$dport" ] && [ -n "$target" ] || die "-p, --dport and -j are required"
+[ -z "$match" ] || [ "$match" = "$proto" ] || die "-m must match -p"
+
+exec $IPTABLES -t raw "$action" PREROUTING ${src:+-s "$src"} -p "$proto" ${match:+-m "$match"} --dport "$dport" -j "$target"

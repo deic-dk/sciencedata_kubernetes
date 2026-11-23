@@ -128,7 +128,7 @@ if(!empty($cvmfs_repos)){
 }
 
 $cmd = '/bin/bash -c set -o pipefail;' . // use bash with pipefail so the error code from run_pod gets propagated
-	' export KUBECONFIG=/etc/kubernetes/admin.conf;' . // use kubernetes config
+	' export KUBECONFIG=/etc/kubernetes/pods.conf;' . // use kubernetes config
 	(empty($file) ? '' : ' export FILE="' . $file . '";') .
 	(empty($peers) ? '' : ' export PEERS="' . $peers . '";') .
 	(empty($setup_script) ? '' : ' export SETUP_SCRIPT="' . $setup_script . '";') .

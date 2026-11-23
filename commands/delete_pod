@@ -160,31 +160,31 @@ remove_ssh_firewall_rules() {
 	ssh_port=`kubectl get services --all-namespaces | grep " NodePort " | grep " $pod_name\-ssh " | sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|'`
 	
 	# Delete blocking rule for this port - should only be this one:
-	# sudo iptables -t raw -D PREROUTING -p tcp --dport $ssh_port -j DROP
+	# sudo /usr/local/sbin/pod_iptables -t raw -D PREROUTING -p tcp --dport $ssh_port -j DROP
 	# But duplicates may be there (from crashes), so we iterate to delete all present
-	sudo iptables -t raw -S PREROUTING | grep DROP | grep "dport $ssh_port " | while read line; do
+	sudo /usr/local/sbin/pod_iptables -t raw -S PREROUTING | grep DROP | grep "dport $ssh_port " | while read line; do
 		cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
-		$run sudo iptables $cmd
+		$run sudo /usr/local/sbin/pod_iptables $cmd
 	done
 	
 	# Delete ACCEPT rules for this port
 	# E.g. iptables -t raw -I PREROUTING -p tcp --dport $ssh_port -s $allowed_ip -j ACCEPT
-	sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $ssh_port " | while read line; do
+	sudo /usr/local/sbin/pod_iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $ssh_port " | while read line; do
 		cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
-		$run sudo iptables $cmd
+		$run sudo /usr/local/sbin/pod_iptables $cmd
 	done
 	
 	# Extra ports - and the https (Caddy) port, podInfo[10]
 	{ kubectl get services --all-namespaces | grep " NodePort " | grep " $pod_name\-extra-"; echo "${podInfo[10]}"; } | \
 	sed -E 's|.*:(.*[0-9]+)/TCP.*|\1|' | grep . | \
 	while read extra_port; do
-		sudo iptables -t raw -S PREROUTING | grep DROP | grep "dport $extra_port " | while read line; do
+		sudo /usr/local/sbin/pod_iptables -t raw -S PREROUTING | grep DROP | grep "dport $extra_port " | while read line; do
 			cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
-			$run sudo iptables $cmd
+			$run sudo /usr/local/sbin/pod_iptables $cmd
 		done
-		sudo iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $extra_port " | while read line; do
+		sudo /usr/local/sbin/pod_iptables -t raw -S PREROUTING | grep ACCEPT | grep "dport $extra_port " | while read line; do
 			cmd=`echo $line | sed -E 's|-A PREROUTING|-t raw -D PREROUTING|'`
-			$run sudo iptables $cmd
+			$run sudo /usr/local/sbin/pod_iptables $cmd
 		done
 	done
 

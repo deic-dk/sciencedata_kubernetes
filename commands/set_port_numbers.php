@@ -22,7 +22,7 @@ if(empty($owner) || empty($pod) || empty($owner)){
 	exit;
 }
 
-exec('export KUBECONFIG=/etc/kubernetes/admin.conf; set_port_numbers -u "'.$owner.'"  -w "'.$https_port.'" -s "'.$ssh_port.'" -x "'.$extra_ports.'" "'.$pod.'"', $output, $retval);
+exec('export KUBECONFIG=/etc/kubernetes/pods.conf; set_port_numbers -u "'.$owner.'"  -w "'.$https_port.'" -s "'.$ssh_port.'" -x "'.$extra_ports.'" "'.$pod.'"', $output, $retval);
 
 if($retval===0){
 	echo "{\"data\":{\"name\":\"$pod\", ".
